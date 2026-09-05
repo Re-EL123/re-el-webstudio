@@ -462,6 +462,12 @@ export function neutralizeReplicaClears(
     if (AUTO_NEUTRAL_PROPS.has(key)) out[key] = 'auto';
     else if (key === 'position') out[key] = 'static';
     else if (key === 'transform') out[key] = 'translate(0px, 0px)';
+    // Motion shorthands (a shape's `x/y: '-50%'` centering, a rotate): a
+    // variant-entry delete just re-exposes the default entry's value, so the
+    // clear must be an explicit neutral (2026-09-06, shape canonical model on
+    // variant tiles).
+    else if (/^(x|y|z|translate[XYZ]|rotate[XYZ]?|skew[XY])$/.test(key)) out[key] = '0';
+    else if (/^scale[XY]?$/.test(key)) out[key] = '1';
   }
   return out;
 }

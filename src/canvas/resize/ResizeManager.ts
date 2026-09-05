@@ -36,7 +36,7 @@ import { getTransformedPoint } from '@/canvas/canvas-math';
 import { transformManager } from '@/canvas/transform';
 import { getCanvasBridge } from '@/canvas/canvas-bridge';
 import { captureVisualRect } from '@/canvas/visual-rect';
-import { shapePositionNormalizationStyles, stripTranslateTransforms } from '@/shared/position-utils';
+import { shapePositionNormalizationStyles, stripTranslateTransforms, neutralizeReplicaClears } from '@/shared/position-utils';
 import { composeTransformWithRotate } from '@/shared/motion-transform';
 import { styleHelperOps } from '@/canvas/selection/style-helper-store';
 import { resizeLiveOps } from '@/canvas/resize/resize-live-store';
@@ -1296,10 +1296,16 @@ export function startResize(
   // source write, flushed, so the whole gesture runs on the canonical model.
   if (nodeData?.type === 'svg' && getNodeFromCache(nodeData.parentId ?? '')?.type !== 'svg') {
     const rect = captureVisualRect(nodeId, vpId);
-    const norm = rect ? shapePositionNormalizationStyles(nodeData.styles ?? {}, rect) : null;
+    const mv = (nodeData.motionVariants ?? {}) as Record<string, Record<string, unknown>>;
+    // TILE-EFFECTIVE map: a stale `x`/`%` can live in an entry, not the base.
+    const merged: Record<string, unknown> = { ...(nodeData.styles ?? {}), ...(mv.default ?? {}), ...(isPrimaryViewport(vpId) ? {} : (mv[vpId] ?? {})) };
+    const mergedStr: Record<string, string> = {};
+    for (const [k, v] of Object.entries(merged)) if (v != null && v !== '') mergedStr[k] = String(v);
+    let norm = rect ? shapePositionNormalizationStyles(mergedStr, rect) : null;
+    // Variant tile: a '' clear only deletes the entry key and the default
+    // entry's value cascades back — write explicit neutrals instead.
+    if (norm && !isPrimaryViewport(vpId)) norm = neutralizeReplicaClears(norm, mergedStr);
     if (norm) {
-      const mv = (nodeData.motionVariants ?? {}) as Record<string, Record<string, unknown>>;
-      const merged: Record<string, unknown> = { ...(nodeData.styles ?? {}), ...(mv.default ?? {}), ...(isPrimaryViewport(vpId) ? {} : (mv[vpId] ?? {})) };
       const rot = parseFloat(String(merged.rotate ?? '')) || 0;
       const visuals = stripTranslateTransforms(typeof merged.transform === 'string' ? merged.transform : '');
       const domTransform = rot ? composeTransformWithRotate({ ...merged, x: '', y: '', transform: visuals }, rot) : visuals;

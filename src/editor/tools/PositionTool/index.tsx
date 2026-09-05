@@ -14,6 +14,8 @@ import { nodeTreeStructureVersionAtom, getNodeFromCache } from '@/code/stores/st
 import { useNode, useNodesComputed } from '@/code/stores/node-family';
 import { trace } from '@/shared/debug-trace';
 import { captureVisualRect } from '@/canvas/visual-rect';
+import { applyReplicaClearSemantics } from './replica-clears';
+import { isPrimaryViewport } from '@/shared/constants';
 import { shapeAlignStyles, shapePositionNormalizationStyles } from '@/shared/position-utils';
 import type { AlignDirection } from '@/shared/pin-utils';
 
@@ -129,7 +131,9 @@ export default function PositionTool({ nodeId, styles, vpId, isReplica, vpWidth,
   const handleShapeAlign = useCallback((dir: AlignDirection) => {
     const rect = captureVisualRect(nodeId, vpId);
     if (!rect) return;
-    const u = shapeAlignStyles(dir, rect);
+    // On a variant tile the '' clears must mask the default entry (explicit
+    // neutrals), or the deleted key just re-exposes `default.x: '-50%'`.
+    const u = applyReplicaClearSemantics(nodeId, vpId, shapeAlignStyles(dir, rect));
     trace.action('alignment:apply-shape', { nodeId, dir, u });
     updateMultipleStyles(u);
   }, [nodeId, vpId, updateMultipleStyles]);
@@ -138,9 +142,16 @@ export default function PositionTool({ nodeId, styles, vpId, isReplica, vpWidth,
   // model (a stale `%` on the other axis or a leftover shorthand would drift).
   const updateShapeCoord = useCallback((key: string, value: string) => {
     const rect = captureVisualRect(nodeId, vpId);
-    const base = rect ? (shapePositionNormalizationStyles(styles, rect) ?? {}) : {};
-    updateMultipleStyles({ ...base, [key]: value });
-  }, [nodeId, vpId, styles, updateMultipleStyles]);
+    // Canonical check on the TILE-EFFECTIVE map (inline ⊕ default ⊕ this
+    // variant's entry) — a stale `x`/`%` can live in an entry, not the base.
+    const mv = (liveNode?.motionVariants ?? {}) as Record<string, Record<string, unknown>>;
+    const eff: Record<string, string> = { ...styles };
+    for (const src of [mv.default, isPrimaryViewport(vpId) ? undefined : mv[vpId]]) {
+      for (const [k, v] of Object.entries(src ?? {})) if (v != null && v !== '') eff[k] = String(v);
+    }
+    const base = rect ? (shapePositionNormalizationStyles(eff, rect) ?? {}) : {};
+    updateMultipleStyles(applyReplicaClearSemantics(nodeId, vpId, { ...base, [key]: value }));
+  }, [nodeId, vpId, styles, liveNode, updateMultipleStyles]);
 
   // Top-level nodes (canvas nodes, variant roots): only show X/Y space
   if (isTopLevel) {

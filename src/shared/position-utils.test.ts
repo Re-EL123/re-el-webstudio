@@ -321,3 +321,12 @@ describe('shape canonical position model (Framer parity)', () => {
     expect(shapeAlignStyles('top', rect)).toEqual({ left: '12.346px', top: '0px', ...clears });
   });
 });
+
+describe('neutralizeReplicaClears — motion shorthands', () => {
+  test("x/y clears become '0' only when the base carries them", async () => {
+    const { neutralizeReplicaClears } = await import('./position-utils');
+    expect(neutralizeReplicaClears({ x: '', y: '', right: '' }, { x: '-50%', y: '-50%' })).toEqual({ x: '0', y: '0', right: '' });
+    expect(neutralizeReplicaClears({ x: '' }, {})).toEqual({ x: '' });
+    expect(neutralizeReplicaClears({ scale: '' }, { scale: '1.2' })).toEqual({ scale: '1' });
+  });
+});

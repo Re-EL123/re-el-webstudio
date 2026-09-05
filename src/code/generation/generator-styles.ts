@@ -2816,6 +2816,12 @@ function updateVariantStyleInCodeInner(
     return vm ? (vm[1] ?? vm[2] ?? vm[3] ?? null) : null;
   };
 
+  // A seeded rest value must be VALID JS: motion props are usually bare
+  // numbers, but `x`/`y` legitimately hold percent strings (`'-50%'`, a
+  // centering pin). Emitting `x: -50%` raw was a parse error the validator
+  // blocked — every align/pin write on such a shape bounced (live find
+  // 2026-09-06, "Unexpected token (152:49)").
+  const seedLiteral = (v: string): string => (/^-?\d+(\.\d+)?$/.test(v) ? v : `'${v.replace(/'/g, "\\'")}'`);
   const ensureTransformNeutralOnAllVariants = (result: string, props: string[]): string => {
     const motionProps = props.filter((k) => MOTION_TRANSFORM_PROPS.has(k));
     if (motionProps.length === 0) return result;
@@ -2836,7 +2842,7 @@ function updateVariantStyleInCodeInner(
         if (openIdx === -1) continue;
         const seeded = motionProps.map((k) => {
           const rest = defaultEntryValue(out, k) ?? readBaseValues([k])[k] ?? MOTION_TRANSFORM_NEUTRAL[k] ?? '0';
-          return `${emitKey(k)}: ${rest}`;
+          return `${emitKey(k)}: ${seedLiteral(String(rest))}`;
         }).join(', ');
         out = out.slice(0, openIdx + 1) + `\n  '${name}': { ${seeded} },` + out.slice(openIdx + 1);
         continue;
@@ -2855,7 +2861,7 @@ function updateVariantStyleInCodeInner(
         const restValue = defaultEntryValue(out, k) ?? readBaseValues([k])[k] ?? MOTION_TRANSFORM_NEUTRAL[k] ?? '0';
         content = content.trimEnd();
         if (content && !content.endsWith(',')) content += ',';
-        content += ` ${emitKey(k)}: ${restValue},`;
+        content += ` ${emitKey(k)}: ${seedLiteral(String(restValue))},`;
         changed = true;
       }
       if (!changed) continue;
@@ -2956,7 +2962,7 @@ function updateVariantStyleInCodeInner(
     // `display: '-50%'`-style value (numeric/percent — never a display
     // keyword) is garbage the browser ignores; drop it so the entry stops
     // carrying it forward on every rewrite.
-    const healedContent = entryContent.replace(/(^|[,{\s])display\s*:\s*['"](-?\d[^'"]*)['"]\s*,?/g, '$1');
+    const healedContent = entryContent.replace(/(^|[,{\s])(?:display|transformBox|position|overflow|pointerEvents|visibility)\s*:\s*['"](-?\d[^'"]*)['"]\s*,?/g, '$1');
     if (healedContent !== entryContent) {
       trace.action('generator:variant-entry-heal-invalid-display', { nodeId, variantName });
       entryContent = healedContent;
@@ -2964,11 +2970,32 @@ function updateVariantStyleInCodeInner(
     const fullMatchStart = constIdx + afterConst.indexOf(entryMatch[0]);
     const fullMatchEnd = fullMatchStart + entryMatch[0].length;
     let result = code.slice(0, fullMatchStart) + entryMatch[1] + entryContent + entryMatch[3] + code.slice(fullMatchEnd);
+    // The same heal across the WHOLE variants object: the stray value usually
+    // sits in `default` (the entry the pre-anchor collision poisoned) while
+    // the write targets another variant — so sweep every entry, brace-balanced
+    // from the const's opening `{`.
+    {
+      const cStart = result.indexOf(`const ${variantsVarName}`);
+      const oStart = cStart === -1 ? -1 : result.indexOf('{', cStart);
+      if (oStart !== -1) {
+        let depth = 0, i = oStart;
+        for (; i < result.length; i++) {
+          if (result[i] === '{') depth++;
+          else if (result[i] === '}' && --depth === 0) break;
+        }
+        const objText = result.slice(oStart, i + 1);
+        const healedObj = objText.replace(/(^|[,{\s])(?:display|transformBox|position|overflow|pointerEvents|visibility)\s*:\s*['"](-?\d[^'"]*)['"]\s*,?/g, '$1');
+        if (healedObj !== objText) {
+          trace.action('generator:variants-object-heal-invalid-keyword-values', { nodeId, variantsVarName });
+          result = result.slice(0, oStart) + healedObj + result.slice(i + 1);
+        }
+      }
+    }
     // Ensure default entry has base values for these properties
     if (variantName !== 'default') {
       result = ensureDefaultHasBaseValues(result, setProps);
-    result = ensureTransformNeutralOnAllVariants(result, Object.keys(styles));
-      result = ensureTransformNeutralOnAllVariants(result, Object.keys(styles));
+    result = ensureTransformNeutralOnAllVariants(result, setProps);
+      result = ensureTransformNeutralOnAllVariants(result, setProps);
     }
     // Add layout prop when order changes — CSS order is not animatable,
     // framer-motion's layout prop enables smooth FLIP animations for reorder.
@@ -3002,8 +3029,8 @@ function updateVariantStyleInCodeInner(
     let result = code;
     if (variantName !== 'default') {
       result = ensureDefaultHasBaseValues(result, setProps);
-    result = ensureTransformNeutralOnAllVariants(result, Object.keys(styles));
-      result = ensureTransformNeutralOnAllVariants(result, Object.keys(styles));
+    result = ensureTransformNeutralOnAllVariants(result, setProps);
+      result = ensureTransformNeutralOnAllVariants(result, setProps);
     }
     if ('order' in styles) {
       result = ensureLayoutProp(result, nodeId);
@@ -3031,7 +3058,7 @@ function updateVariantStyleInCodeInner(
   // Ensure default entry has base values for these properties
   if (variantName !== 'default') {
     result = ensureDefaultHasBaseValues(result, setProps);
-    result = ensureTransformNeutralOnAllVariants(result, Object.keys(styles));
+    result = ensureTransformNeutralOnAllVariants(result, setProps);
   }
   // Add layout prop when order changes
   if ('order' in styles) {

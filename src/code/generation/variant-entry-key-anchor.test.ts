@@ -75,3 +75,55 @@ describe('variant entry key anchoring', () => {
     expect((d.match(/--ring/g) ?? []).length).toBe(1);
   });
 });
+
+describe('transform-neutral seeder: quoting + no seeding on delete (2026-09-06)', () => {
+  const THREE = (v1: string, v2: string) => `import React from 'react';
+import { motion, LayoutGroup } from 'framer-motion';
+const variantConfig = [
+  { name: 'default', label: 'F', x: 0, y: 0, isPrimary: true },
+  { name: 'variant-1', label: 'F', x: 400, y: 0 },
+  { name: 'variant-2', label: 'F', x: 800, y: 0 },
+];
+const barVariants = {
+  default: { left: '50%', top: '50%', x: '-50%', y: '-50%', rotate: 40.9 },
+  'variant-1': ${v1},
+  'variant-2': ${v2},
+};
+function Comp({ style, initialVariant = 'default' }: { style?: React.CSSProperties; initialVariant?: string }) {
+  return (<LayoutGroup>
+    <motion.div layout={true} data-id="root" style={{ position: 'relative', width: '200px', height: '200px', ...style }}>
+      <motion.svg layout={true} data-id="bar" variants={barVariants} initial={['default', initialVariant]} animate={['default', initialVariant]} viewBox="0 0 25 4" style={{ position: 'absolute', width: '26px', height: '4px' }}>
+        <motion.rect data-id="bar-g0" width="100%" height="100%" fill="#000" />
+      </motion.svg>
+    </motion.div>
+  </LayoutGroup>);
+}
+export default Comp;`;
+
+  it('the live crash: clearing x/y on variant-1 must NOT seed unquoted -50% into variant-2', async () => {
+    const { parseJSX } = await import('../parsing/ast-utils');
+    const code = THREE(`{ rotate: 45 }`, `{ rotate: 45 }`);
+    const out = updateVariantStyleInCode(code, 'bar', 'variant-1', { left: '3px', top: '14px', right: '', bottom: '', x: '', y: '' });
+    expect(out).not.toContain('x: -50%');
+    expect(out).not.toContain('y: -50%');
+    expect(parseJSX(out)).not.toBeNull();
+    // variant-2 was not touched by a DELETE
+    expect(out).toMatch(/'variant-2':\s*\{\s*rotate: 45\s*,?\s*\}/);
+  });
+
+  it('a legit percent rest seed is QUOTED (valid JS), numbers stay bare', async () => {
+    const { parseJSX } = await import('../parsing/ast-utils');
+    const code = THREE(`{ rotate: 45 }`, `{ rotate: 45 }`);
+    const out = updateVariantStyleInCode(code, 'bar', 'variant-1', { x: '-40%' });
+    expect(out).toMatch(/'variant-2':\s*\{[^}]*x: '-50%'/);   // seeded from default, quoted
+    expect(out).not.toMatch(/x: -\d+%/);
+    expect(parseJSX(out)).not.toBeNull();
+  });
+
+  it('heals keyword props holding a stray percent (transformBox: "-50%")', () => {
+    const code = THREE(`{ rotate: 45 }`, `{ rotate: 45 }`).replace("rotate: 40.9 }", "rotate: 40.9, transformBox: '-50%' }");
+    const out = updateVariantStyleInCode(code, 'bar', 'default', { rotate: '41' });
+    expect(out).not.toContain("transformBox: '-50%'");
+    expect(out).toContain('rotate: 41');
+  });
+});

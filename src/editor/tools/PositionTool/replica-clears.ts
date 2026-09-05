@@ -26,7 +26,14 @@ export function applyReplicaClearSemantics(
   // Solo-replica writes REDIRECT to the base inline channel (node-ops'
   // solo redirect) — there `''` really is a base delete; keep it.
   if (node.attrs?.['data-replica-solo']) return styles;
-  const out = neutralizeReplicaClears(styles, node.styles ?? {});
+  // "Base-carried" for a component variant means inline base ⊕ the
+  // `default` entry: the canvas/motion merge default under every variant, so
+  // a value living only in `default` (e.g. a shape's `x: '-50%'`) cascades
+  // back exactly like an inline one when the variant key is deleted.
+  const defaultEntry = (node.motionVariants?.default ?? {}) as Record<string, unknown>;
+  const base: Record<string, string> = { ...(node.styles ?? {}) };
+  for (const [k, v] of Object.entries(defaultEntry)) if (v != null && v !== '') base[k] = String(v);
+  const out = neutralizeReplicaClears(styles, base);
   const translated = Object.keys(out).filter((k) => out[k] !== styles[k]);
   if (translated.length > 0) {
     trace.action('position:replica-clear-neutralized', { nodeId, vpId, keys: translated });

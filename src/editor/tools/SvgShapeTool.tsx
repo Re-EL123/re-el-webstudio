@@ -50,6 +50,7 @@ import { selectedIdsAtom, getNodesSnapshot } from '@/code/stores/store';
 import type { CanvasNode } from '@/code/parsing/parser';
 import { resolveShapeAttrTargets } from './svg-shape-targets';
 import { trace } from '@/shared/debug-trace';
+import { isComponentFilePath } from '@/code/project/active-file-store';
 
 // SVG presentation attributes that are ALSO valid CSS properties — so a
 // per-tile (variant / viewport) override can ride the CSS cascade on top of the
@@ -243,8 +244,22 @@ export default function SvgShapeTool() {
     return out;
   }, [rawTileOverrides]);
 
-  // base attrs ⊕ this tile's overrides (variant or @media) ⊕ in-flight shape-edit buffer.
-  const attrs = { ...(shapeNode?.attrs ?? {}), ...tileOverrides, ...pendingOverrides };
+  // On a component PRIMARY tile the painted value is the shape's `default`
+  // entry (motion applies it over the attribute) — overlay it so the panel
+  // shows what the canvas shows. Kept OUT of `rawTileOverrides` so it never
+  // lights the per-tile override indicator (it isn't an override).
+  const primaryDefaultOverlay = useMemo(() => {
+    const out: Record<string, string> = {};
+    if (inNonDefaultVariant || !isComponentFilePath(getActiveFilePath())) return out;
+    const def = (shapeNode?.motionVariants?.default ?? {}) as Record<string, unknown>;
+    for (const [camelKey, value] of Object.entries(def)) {
+      if (typeof value === 'string' || typeof value === 'number') out[toKebab(camelKey)] = String(value);
+    }
+    return out;
+  }, [inNonDefaultVariant, shapeNode]);
+
+  // base attrs ⊕ primary default entry ⊕ this tile's overrides (variant or @media) ⊕ in-flight shape-edit buffer.
+  const attrs = { ...(shapeNode?.attrs ?? {}), ...primaryDefaultOverlay, ...tileOverrides, ...pendingOverrides };
 
   // Overridden when the active source has the prop. Check the CAMELCASE key the sources store
   // (`stroke-width` → `strokeWidth`). `stroke`/`fill` are single-word so they matched either way — which
@@ -300,6 +315,26 @@ export default function SvgShapeTool() {
     }
 
     queueMutation({ type: 'updateSvgAttrs', nodeId: tNodeId, attrs: { [key]: value }, childIndex: tChildIndex });
+    // PRIMARY WRITE MUST ALSO REFRESH A STALE `variants.default` ENTRY. The first
+    // per-variant recolour seeds the shape's variants object with the base value
+    // of that moment (`default: { fill: '#3b82f6' }`, the transform-law return
+    // value). Every later PRIMARY recolour only rewrote the ATTRIBUTE — and on
+    // the primary tile motion/the Renderer apply the default ENTRY over the
+    // attribute, so the shape kept painting the old colour while the panel
+    // (reading the attribute) showed the new one (live find 2026-09-05: black
+    // in the panel, blue on canvas). Same mirror node-ops applies to inline
+    // styles; done only when the entry already carries the key, so sparse
+    // sources stay sparse.
+    const primaryCamel = CSS_ROUTABLE_SHAPE_ATTRS[key];
+    const defaultEntry = tShapeNode?.motionVariants?.default as Record<string, unknown> | undefined;
+    if (primaryCamel && tShapeNode && defaultEntry && defaultEntry[primaryCamel] !== undefined) {
+      const sid = tShapeNode.id.startsWith(`${tNodeId}-g`) ? tShapeNode.id : `${tNodeId}-g${tChildIndex}`;
+      queueMutation({ type: 'updateVariantStyle', nodeId: sid, variantName: 'default', styles: { [primaryCamel]: value } });
+      // The painted value on this tile IS the entry (applied as a style), so the
+      // attribute-only live patch below can't show it — patch the style too.
+      getCanvasBridge().patchStyles(sid, vpPrefix, { [primaryCamel]: value }, true);
+      trace.action('svg-shape-tool:mirror-default-entry', { nodeId: tNodeId, sid, key: primaryCamel, value });
+    }
     // Always go through `setChildShapeAttribute` (parent SVG nodeId + childIndex)
     // rather than `setAttribute(shapeChildId, …)`. Inner-shape `data-id`s
     // (auto_1, auto_2…) restart their counter per SVG, so multiple SVGs in
@@ -344,13 +379,22 @@ export default function SvgShapeTool() {
     // Live feedback fans out to every selected shape (same targets as the commit)
     // so a picker/chevron drag paints all selected shapes at once, not just the
     // primary. Bridge-only (no source write) — the commit lands on release.
+    const liveCamel = CSS_ROUTABLE_SHAPE_ATTRS[key];
     for (const t of resolveAttrTargets()) {
       bridge.setChildShapeAttribute?.(t.nodeId, vpPrefix, t.childIndex, key, value === '' ? null : value);
+      // Primary tile + a `default` entry carrying this key: the entry is applied
+      // as a STYLE over the attribute, so the attribute patch alone shows nothing
+      // during the drag — patch the style on the child too (see applyAttrToTarget).
+      const def = t.shapeNode?.motionVariants?.default as Record<string, unknown> | undefined;
+      if (liveCamel && t.shapeNode && def && def[liveCamel] !== undefined && !inNonDefaultVariant) {
+        const sid = t.shapeNode.id.startsWith(`${t.nodeId}-g`) ? t.shapeNode.id : `${t.nodeId}-g${t.childIndex}`;
+        getCanvasBridge().patchStyles(sid, vpPrefix, { [liveCamel]: value }, true);
+      }
     }
     // Shape-edit mode commits via the pending-override buffer, not the queue —
     // mirror `updateAttr`'s shape-edit branch so a live drag still records.
     if (isInShapeEdit) setPendingOverrides(prev => ({ ...prev, [key]: value }));
-  }, [nodeId, vpId, childIndex, isInShapeEdit, resolveAttrTargets]);
+  }, [nodeId, vpId, childIndex, isInShapeEdit, resolveAttrTargets, inNonDefaultVariant]);
 
   // ─── Reset a per-tile override ("Reset Override" menu item) ───────────────
   // Drops THIS tile's @media / variant CSS override for the prop so the shared

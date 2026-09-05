@@ -19,6 +19,7 @@ import { transformManager } from '@/canvas/transform';
 import { type VisualRect, toPercentageCenter, toFixedPin, toInsetMode, fromInsetMode, stripTranslateTransforms, buildAxisCenterTransform, centeringChannel, extractAxisTranslate } from '@/shared/position-utils';
 import { applyReplicaClearSemantics } from './replica-clears';
 import { trace } from '@/shared/debug-trace';
+import { captureVisualRect } from '@/canvas/visual-rect';
 import { queueMutation } from '@/code/mutation/mutation-queue';
 
 /** Mark a node as user-pinned so AbsoluteInFrameStrategy stops auto-
@@ -185,67 +186,9 @@ export default function PinControl({ styles, nodeId, vpId, onUpdate, onUpdateMul
    *     already shows the visually centered position, so no further fix needed
    *     for non-rotated parents. Rotated parents fall back to inline-style math.
    */
-  const captureRectViaBridge = useCallback((): VisualRect | null => {
-    const node = getNodesSnapshot().get(nodeId);
-    const parentId = node?.parentId;
-    if (!parentId) return null;
-    const scale = transformManager.getTransform().scale || 1;
-
-    const elScreen = findNodeRect(nodeId, vpId);
-    const parentScreen = findNodeRect(parentId, vpId);
-    if (!elScreen || !parentScreen) return null;
-
-    const computed = findNodeComputedStyles(nodeId, vpId, ['width', 'height']);
-    const width = parseFloat(computed.width) || elScreen.width / scale;
-    const height = parseFloat(computed.height) || elScreen.height / scale;
-
-    const parentInner = findNodeParentInnerSize(nodeId, vpId);
-    const parentWidth = parentInner.width || parentScreen.width / scale;
-    const parentHeight = parentInner.height || parentScreen.height / scale;
-
-    // CSS `left`/`right` for absolute children resolve against the parent's
-    // PADDING box, not the border box. The BCR delta gives us offset from the
-    // border edge, so subtract parent border widths to land in padding-box
-    // coordinates. Skipping this caused inset values to drift each toggle on
-    // parents with borders.
-    const parentBorders = findNodeComputedStyles(parentId, vpId, ['borderLeftWidth', 'borderTopWidth']);
-    const borderL = parseFloat(parentBorders.borderLeftWidth) || 0;
-    const borderT = parseFloat(parentBorders.borderTopWidth) || 0;
-
-    // Parent-relative LAYOUT-BOX top-left (not the AABB top-left).
-    // `elScreen` is the rotated/scaled SCREEN AABB — for a rotated
-    // element the AABB is shifted from the layout box by
-    // `(aabbW - layoutW) / 2` on each axis (with default `transform-
-    // origin: 50% 50%` the AABB centre coincides with the layout-box
-    // centre). Treating `elScreen.left` as the layout-box left would
-    // place the layout box at the AABB edge after a pin commit —
-    // since the transform reapplies on top, the painted AABB then
-    // shifts again, producing the jump-on-toggle the user reported.
-    // The fix: derive layout-box top-left from the AABB centre via
-    // `layoutLeft = aabbCenterX - layoutW / 2`. Collapses to the
-    // original formula for non-rotated elements (aabbW = layoutW).
-    const aabbCssW = elScreen.width / scale;
-    const aabbCssH = elScreen.height / scale;
-    const aabbLeft = (elScreen.left - parentScreen.left) / scale - borderL;
-    const aabbTop = (elScreen.top - parentScreen.top) / scale - borderT;
-    const left = aabbLeft + (aabbCssW - width) / 2;
-    const top = aabbTop + (aabbCssH - height) / 2;
-
-    const centerX = left + width / 2;
-    const centerY = top + height / 2;
-    const centerXPercent = parentWidth > 0 ? (centerX / parentWidth) * 100 : 50;
-    const centerYPercent = parentHeight > 0 ? (centerY / parentHeight) * 100 : 50;
-
-    trace.action('pin:capture-rect', {
-      nodeId, vpId, parentId,
-      elScreen: { left: elScreen.left, top: elScreen.top, width: elScreen.width, height: elScreen.height },
-      parentScreen: { left: parentScreen.left, top: parentScreen.top, width: parentScreen.width, height: parentScreen.height },
-      scale, borderL, borderT, parentWidth, parentHeight,
-      result: { left, top, width, height },
-    });
-
-    return { left, top, width, height, parentWidth, parentHeight, centerXPercent, centerYPercent };
-  }, [nodeId, vpId]);
+  // Shared implementation — see canvas/visual-rect.ts (also used by the shape
+  // position model in resize start / align / X-Y fields).
+  const captureRectViaBridge = useCallback((): VisualRect | null => captureVisualRect(nodeId, vpId), [nodeId, vpId]);
 
   const handlePinToggle = useCallback((side: PinSide) => {
     // Capture visual rect BEFORE any changes (bridge-aware, works in iframe mode)

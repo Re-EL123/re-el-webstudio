@@ -35,6 +35,9 @@ import { scaleShapeGeometry, GEOMETRY_ATTRS_BY_TAG } from '@/shared/svg-geometry
 import { getTransformedPoint } from '@/canvas/canvas-math';
 import { transformManager } from '@/canvas/transform';
 import { getCanvasBridge } from '@/canvas/canvas-bridge';
+import { captureVisualRect } from '@/canvas/visual-rect';
+import { shapePositionNormalizationStyles, stripTranslateTransforms } from '@/shared/position-utils';
+import { composeTransformWithRotate } from '@/shared/motion-transform';
 import { styleHelperOps } from '@/canvas/selection/style-helper-store';
 import { resizeLiveOps } from '@/canvas/resize/resize-live-store';
 import { getInsetState, mergeVariantPinStyles } from '@/shared/pin-utils';
@@ -1266,7 +1269,7 @@ export function startResize(
   const vpPrefix = getViewportPrefix(vpId);
 
   // Read node data directly from internal cache (bypasses atom staleness after resize/drag)
-  const nodeData = getNodeFromCache(nodeId);
+  let nodeData = getNodeFromCache(nodeId);
 
   // Fixed overlays (modals) are NOT resizable — they always cover the full
   // viewport (the Renderer sizes them to the tile, not the user). Bail before any
@@ -1281,6 +1284,30 @@ export function startResize(
           return;
         }
       } catch { /* skip */ }
+    }
+  }
+
+  // SHAPE CANONICAL POSITION MODEL (Framer parity, 2026-09-05). A top-level
+  // vector shape resizes stably ONLY in px left/top with no centering translate
+  // in either channel; a `-50%` shorthand (a % of the shape's OWN size) moved
+  // the shape by half the size delta every tick while the pin math thought the
+  // opposite corner was anchored. Normalise BEFORE the gesture reads its start
+  // styles: DOM first (invisible — same painted box, rotation kept), then the
+  // source write, flushed, so the whole gesture runs on the canonical model.
+  if (nodeData?.type === 'svg' && getNodeFromCache(nodeData.parentId ?? '')?.type !== 'svg') {
+    const rect = captureVisualRect(nodeId, vpId);
+    const norm = rect ? shapePositionNormalizationStyles(nodeData.styles ?? {}, rect) : null;
+    if (norm) {
+      const mv = (nodeData.motionVariants ?? {}) as Record<string, Record<string, unknown>>;
+      const merged: Record<string, unknown> = { ...(nodeData.styles ?? {}), ...(mv.default ?? {}), ...(isPrimaryViewport(vpId) ? {} : (mv[vpId] ?? {})) };
+      const rot = parseFloat(String(merged.rotate ?? '')) || 0;
+      const visuals = stripTranslateTransforms(typeof merged.transform === 'string' ? merged.transform : '');
+      const domTransform = rot ? composeTransformWithRotate({ ...merged, x: '', y: '', transform: visuals }, rot) : visuals;
+      patchNodeStyles(contentEl, nodeId, vpPrefix, { ...norm, transform: domTransform });
+      updateNodeStyles({ id: nodeId, styles: norm, contentEl });
+      flushNow();
+      nodeData = getNodeFromCache(nodeId) ?? nodeData;
+      trace.action('resize:shape-normalized', { nodeId, vpId, norm, domTransform });
     }
   }
 

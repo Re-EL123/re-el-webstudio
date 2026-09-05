@@ -4,7 +4,7 @@
 import { useCallback, useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { ToolSection, ToolDivider, StyleField } from '../../controls';
-import AlignmentControl from './AlignmentControl';
+import AlignmentControl, { AlignmentButtons } from './AlignmentControl';
 import PositionTypeControl from './PositionTypeControl';
 import PinControl from './PinControl';
 import SpaceControl from './SpaceControl';
@@ -13,6 +13,9 @@ import { transformManager } from '@/canvas/transform';
 import { nodeTreeStructureVersionAtom, getNodeFromCache } from '@/code/stores/store';
 import { useNode, useNodesComputed } from '@/code/stores/node-family';
 import { trace } from '@/shared/debug-trace';
+import { captureVisualRect } from '@/canvas/visual-rect';
+import { shapeAlignStyles, shapePositionNormalizationStyles } from '@/shared/position-utils';
+import type { AlignDirection } from '@/shared/pin-utils';
 
 interface Props {
   nodeId: string;
@@ -67,7 +70,11 @@ export default function PositionTool({ nodeId, styles, vpId, isReplica, vpWidth,
     [liveNode],
   );
 
-  const showPins = (isAbsoluteInFrame || isFixed) && !isSvgGroup;
+  // Any <svg> node (single shape OR group) uses the canonical shape model —
+  // px X/Y + Size, no pins (Framer parity; see position-utils). Pins can't be
+  // made stable on a vector whose centering is a % of its own size.
+  const isSvgNode = liveNode?.type === 'svg';
+  const showPins = (isAbsoluteInFrame || isFixed) && !isSvgGroup && !isSvgNode;
   const showCoords = (isAbsolute || isFixed) && !showPins;
 
   // ─── Update helpers ───────────────────────────────────────────────
@@ -116,6 +123,25 @@ export default function PositionTool({ nodeId, styles, vpId, isReplica, vpWidth,
     return findNodeParentInnerSize(nodeId, vpId);
   }, [nodeId, vpId]);
 
+  // Shape align: canonical px placement (aligned axis + current other axis),
+  // clearing pins and both centering channels in the same write — never the
+  // `%` + translate recipe, which double-shifted shorthand-centred shapes.
+  const handleShapeAlign = useCallback((dir: AlignDirection) => {
+    const rect = captureVisualRect(nodeId, vpId);
+    if (!rect) return;
+    const u = shapeAlignStyles(dir, rect);
+    trace.action('alignment:apply-shape', { nodeId, dir, u });
+    updateMultipleStyles(u);
+  }, [nodeId, vpId, updateMultipleStyles]);
+
+  // Shape X/Y field: a coordinate edit also lands the node in the canonical
+  // model (a stale `%` on the other axis or a leftover shorthand would drift).
+  const updateShapeCoord = useCallback((key: string, value: string) => {
+    const rect = captureVisualRect(nodeId, vpId);
+    const base = rect ? (shapePositionNormalizationStyles(styles, rect) ?? {}) : {};
+    updateMultipleStyles({ ...base, [key]: value });
+  }, [nodeId, vpId, styles, updateMultipleStyles]);
+
   // Top-level nodes (canvas nodes, variant roots): only show X/Y space
   if (isTopLevel) {
     return (
@@ -138,14 +164,18 @@ export default function PositionTool({ nodeId, styles, vpId, isReplica, vpWidth,
     <>
       <ToolSection title="Position">
         {/* Alignment icons — accent blue when enabled, disabled gray otherwise */}
-        <AlignmentControl
-          nodeId={nodeId}
-          enabled={isAbsolute || isFixed}
-          styles={styles}
-          onUpdate={updateMultipleStyles}
-          getElementRect={getElementRect}
-          getParentRect={getParentRect}
-        />
+        {isSvgNode ? (
+          <AlignmentButtons enabled={isAbsolute || isFixed} onAlign={handleShapeAlign} />
+        ) : (
+          <AlignmentControl
+            nodeId={nodeId}
+            enabled={isAbsolute || isFixed}
+            styles={styles}
+            onUpdate={updateMultipleStyles}
+            getElementRect={getElementRect}
+            getParentRect={getParentRect}
+          />
+        )}
 
         {/* Position type dropdown */}
         <PositionTypeControl
@@ -174,7 +204,7 @@ export default function PositionTool({ nodeId, styles, vpId, isReplica, vpWidth,
             top={styles.top || '0px'}
             nodeId={nodeId}
             vpId={vpId}
-            onUpdate={updateStyle}
+            onUpdate={isSvgNode ? updateShapeCoord : updateStyle}
           />
         )}
 

@@ -295,3 +295,29 @@ describe('removeAxisTranslate / centeringChannel', () => {
     expect(centeringChannel({ x: '' })).toBe('string');
   });
 });
+
+describe('shape canonical position model (Framer parity)', () => {
+  const rect = { left: 12.3456, top: 40, width: 34, height: 18, parentWidth: 200, parentHeight: 100, centerXPercent: 0, centerYPercent: 0 };
+  test('normalization: null when already canonical (px left/top, nothing else)', async () => {
+    const { shapePositionNormalizationStyles } = await import('./position-utils');
+    expect(shapePositionNormalizationStyles({ left: '10px', top: '5px' }, rect)).toBeNull();
+    expect(shapePositionNormalizationStyles({ left: '10px', top: '5px', rotate: '30' }, rect)).toBeNull();
+  });
+  test('normalization: % left, shorthand x/y, right/bottom, string translate → px + clears', async () => {
+    const { shapePositionNormalizationStyles } = await import('./position-utils');
+    const expected = { left: '12.346px', top: '40px', right: '', bottom: '', x: '', y: '' };
+    expect(shapePositionNormalizationStyles({ left: '50%', top: '17px', x: '-50%', y: '-50%' }, rect)).toEqual(expected);
+    expect(shapePositionNormalizationStyles({ left: '10px', top: '5px', right: '0px' }, rect)).toEqual(expected);
+    expect(shapePositionNormalizationStyles({ left: '10px', top: '5px', transform: 'translateX(-50%) rotate(9deg)' }, rect)).toEqual(expected);
+  });
+  test('shapeAlignStyles: each direction, other axis kept, clears included', async () => {
+    const { shapeAlignStyles } = await import('./position-utils');
+    const clears = { right: '', bottom: '', x: '', y: '' };
+    expect(shapeAlignStyles('center-h', rect)).toEqual({ left: '83px', top: '40px', ...clears });
+    expect(shapeAlignStyles('right', rect)).toEqual({ left: '166px', top: '40px', ...clears });
+    expect(shapeAlignStyles('left', rect)).toEqual({ left: '0px', top: '40px', ...clears });
+    expect(shapeAlignStyles('center-v', rect)).toEqual({ left: '12.346px', top: '41px', ...clears });
+    expect(shapeAlignStyles('bottom', rect)).toEqual({ left: '12.346px', top: '82px', ...clears });
+    expect(shapeAlignStyles('top', rect)).toEqual({ left: '12.346px', top: '0px', ...clears });
+  });
+});

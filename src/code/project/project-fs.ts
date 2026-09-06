@@ -6,6 +6,9 @@
 import { atom } from 'jotai';
 import { buildProvidersSource } from './providers-gen';
 import { trace } from '@/shared/debug-trace';
+import { parseJSX } from '@/code/parsing/ast-utils';
+import { findVariantRootId, insertAtRootRestSpread, stampRootDataVariantAttr } from '@/shared/variant-root';
+import { nodeIdToVarName } from '@/shared/id-utils';
 import { ensureLayoutFile } from '@/code/generation/metadata-gen';
 import {
   ANIMATED_COUNTER_COMPONENT,
@@ -131,6 +134,21 @@ export class InMemoryProjectFS implements ProjectFS {
   writeFile(path: string, content: string): void {
     const origin = this.nextOrigin;
     this.nextOrigin = 'local';
+    // SEED-OVERWRITE GUARD. A user's Home page was replaced by the default
+    // starter page (`HOME_PAGE`) inside an otherwise intact project on
+    // 2026-09-06, and autosave persisted it. Whatever the path (a stale
+    // pre-load code string flushed after a reload is the prime suspect), no
+    // legitimate edit ever produces a byte-identical seed body over a page
+    // that already has real content. Refuse it and trace loudly; fresh
+    // projects are unaffected (their files arrive via loadSnapshot / on a
+    // path that does not exist yet).
+    if (isSeedPageBody(content)) {
+      const existing = this.files.get(path);
+      if (typeof existing === 'string' && existing !== content && !isSeedPageBody(existing)) {
+        trace.error('project-fs:refused-seed-overwrite', `${path}: refused to replace ${existing.length} bytes of real content with a seed page body`);
+        return;
+      }
+    }
     this.files.set(path, content);
     trace.action('project-fs:write', { path, size: content.length, origin });
     this.emit({ kind: 'write', path, content, origin });
@@ -224,6 +242,62 @@ export class InMemoryProjectFS implements ProjectFS {
     if (globals && globals.includes(LEGACY_SEED_RESET)) {
       this.files.set('app/globals.css', globals.replace(LEGACY_SEED_RESET, UNIVERSAL_SEED_RESET));
       trace.action('project-fs:migrated-seed-reset', {});
+    }
+    // Master ROOT MARKER heal: masters created before 2026-09-06 spread
+    // `{...rest}` on their root with no `data-mroot`. Add it (idempotent,
+    // attribute-only insert inside the root opening tag) so the runtime can
+    // re-key root-targeted style rules per instance and overlay runtime can
+    // scope to its own instance. See component-ops injectRestSpread.
+    for (const [path, src] of this.files) {
+      if (!path.startsWith('components/') || !path.endsWith('.tsx')) continue;
+      if (!src.includes('{...rest}') || src.includes('data-mroot=')) continue;
+      // `{...rest}` is not always adjacent to `data-id` (e.g. `variants={…}`
+      // sits between on a master with a variants object) — locate it inside
+      // the ROOT's opening tag instead (live find 2026-09-06: duplicate
+      // instance lost its border because the marker was never added).
+      const rootId = findVariantRootId(src);
+      let healed = rootId ? insertAtRootRestSpread(src, ` data-mroot="${rootId}"`) : src;
+      // Same adjacency miss for the overlay root ref: a master that already
+      // declares `ovRootRef` but whose root never received `ref={ovRootRef}`
+      // scopes its overlays to `document` (first instance wins). Attach it.
+      if (healed.includes('const ovRootRef') && !/ref=\{ovRootRef\}/.test(healed)) {
+        healed = insertAtRootRestSpread(healed, 'ref={ovRootRef}', true);
+      }
+      if (healed !== src) {
+        this.files.set(path, healed);
+        trace.action('project-fs:migrated-master-root-marker', { path });
+      }
+    }
+    // Variant-scoped CSS carrier heal: a master whose <style> has
+    // `[data-variant="v"]` rules (per-variant border overlay / :lang) needs
+    // `data-variant={variant}` ON ITS ROOT for the live site. The old stamper
+    // missed roots with handler attributes (or stamped an overlay instead) —
+    // the hover variant's border never applied on live (2026-09-06).
+    for (const [path, src] of this.files) {
+      if (!path.startsWith('components/') || !path.endsWith('.tsx')) continue;
+      if (!src.includes('[data-variant="')) continue;
+      const healed = stampRootDataVariantAttr(src);
+      if (healed !== src) {
+        this.files.set(path, healed);
+        trace.action('project-fs:migrated-root-data-variant', { path });
+      }
+    }
+    // Variant ROOT INSET heal: a master root's canvas position lives in
+    // variantConfig x/y, never in its inline style. A root-detection bug
+    // (generator-styles findVariantRootId, fixed 2026-09-06) let `left`/`top`
+    // leak into the root's style object and its variants entry; every live
+    // instance then rendered shifted by the tile offset. Strip them here
+    // (parse-gated: the healed source must still parse, else keep the
+    // original). Only px insets directly inside the ROOT's style object and
+    // the root's `<x>Variants` object are touched.
+    for (const [path, src] of this.files) {
+      if (!path.startsWith('components/') || !path.endsWith('.tsx')) continue;
+      const healed = stripVariantRootInsets(src);
+      if (healed !== src) {
+        try { parseJSX(healed); } catch { trace.error('project-fs:variant-root-inset-heal-unparseable', path); continue; }
+        this.files.set(path, healed);
+        trace.action('project-fs:migrated-variant-root-insets', { path });
+      }
     }
     // Restore a WIPED reset: addPresetTokenToCSS used to REPLACE globals.css
     // wholesale when it had no :root block yet (fixed 2026-08-31), erasing the
@@ -1497,6 +1571,50 @@ export default function Page() {
   return <PageClient />;
 }
 `;
+
+/** Is `content` one of the starter page bodies (byte-identical)? Used by the
+ *  writeFile seed-overwrite guard. Function (not const) so it is hoisted past
+ *  the constants' TDZ and only reads them at call time. */
+export function isSeedPageBody(content: string): boolean {
+  return content === HOME_PAGE || content === ABOUT_PAGE || content === EMPTY_HOME_PAGE_CLIENT;
+}
+
+
+/** Remove px `left`/`top`/`right`/`bottom` from a component master's variant
+ *  ROOT inline style and from the root's variants object (see the loadSnapshot
+ *  heal). Returns the input unchanged when there is no root or nothing to strip. */
+export function stripVariantRootInsets(code: string): string {
+  const rootId = findVariantRootId(code);
+  if (!rootId) return code;
+  const insetRe = /\s*\b(left|top|right|bottom):\s*'-?\d+(?:\.\d+)?px',?/g;
+  let out = code;
+  // 1. root opening tag's style={{ … }} (up to the trailing `...style`).
+  const tagIdx = out.indexOf(`data-id="${rootId}"`);
+  if (tagIdx >= 0) {
+    const styleIdx = out.indexOf('style={{', tagIdx);
+    // Instance-size masters end the root style with `...__instStyle` instead.
+    const spreadIdx = styleIdx >= 0
+      ? [out.indexOf('...style', styleIdx), out.indexOf('...__instStyle', styleIdx)].filter((i) => i >= 0).sort((a, b) => a - b)[0] ?? -1
+      : -1;
+    if (styleIdx >= 0 && spreadIdx >= 0 && spreadIdx - styleIdx < 4000) {
+      const before = out.slice(styleIdx, spreadIdx);
+      const after = before.replace(insetRe, '');
+      if (after !== before) out = out.slice(0, styleIdx) + after + out.slice(spreadIdx);
+    }
+  }
+  // 2. the root's variants object: `const <root>Variants = { … };`
+  const varName = nodeIdToVarName(rootId) + 'Variants';
+  const vIdx = out.indexOf(`const ${varName} = {`);
+  if (vIdx >= 0) {
+    const end = out.indexOf('\n};', vIdx);
+    if (end > vIdx && end - vIdx < 20000) {
+      const before = out.slice(vIdx, end);
+      const after = before.replace(insetRe, '');
+      if (after !== before) out = out.slice(0, vIdx) + after + out.slice(end);
+    }
+  }
+  return out;
+}
 
 export function createDefaultProject(): Map<string, string> {
   return new Map([

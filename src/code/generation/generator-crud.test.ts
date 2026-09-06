@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { transform } from '@babel/standalone';
-import { setVariantTextBindingInCode, setVariantStyleBindingInCode, removeNodeInCode, healStyleBlockSelectorAttrsInCode } from './generator-crud';
+import { setVariantTextBindingInCode, setVariantStyleBindingInCode, removeNodeInCode, healStyleBlockSelectorAttrsInCode, updateNodeInCode } from './generator-crud';
 
 const parsesOk = (code: string) =>
   expect(() => transform(code, { presets: ['react', 'typescript'], filename: 'f.tsx' })).not.toThrow();
@@ -188,5 +188,33 @@ describe('healStyleBlockSelectorAttrsInCode', () => {
   it('leaves a normal JSX data-id attribute alone', () => {
     const jsx = `<div data-id="a-1" style={{ color: 'red' }}>x</div>`;
     expect(healStyleBlockSelectorAttrsInCode(jsx)).toBe(jsx);
+  });
+});
+
+// ─── master root never receives inline insets (2026-09-06) ──────────────────
+describe('updateNodeInCode — component variant root insets', () => {
+  const MASTER = `'use client';
+const variantConfig = [{ name: 'default', label: 'Frame', x: -223, y: -90, isPrimary: true }];
+function A({ style, ...rest }: any) {
+  const [o, setO] = useState(false);
+  useLayoutEffect(() => { if (!o) return; return () => {}; }, [o]);
+  return <LayoutGroup>
+    <motion.div data-id="r1" {...rest} style={{ position: 'absolute', width: '100px', ...style }}>
+      <div data-id="c1" style={{ position: 'absolute', left: '1px', top: '2px' }} />
+    </motion.div>
+  </LayoutGroup>;
+}
+export default withResponsiveProps(A);`;
+  it('strips left/top for the root and keeps the size write', () => {
+    const out = updateNodeInCode(MASTER, 'r1', { width: '236px', height: '258px', left: '-356px', top: '-152px' });
+    expect(out).toContain("width: '236px'");
+    expect(out).toContain("height: '258px'");
+    expect(out).not.toContain("'-356px'");
+    expect(out).not.toContain("'-152px'");
+  });
+  it('an insets-only write to the root is a no-op; a child keeps its insets', () => {
+    expect(updateNodeInCode(MASTER, 'r1', { left: '-5px', top: '3px' })).toBe(MASTER);
+    const child = updateNodeInCode(MASTER, 'c1', { left: '10px' });
+    expect(child).toContain("left: '10px'");
   });
 });

@@ -97,6 +97,17 @@ function injectedHelperRanges(code: string): Array<[number, number]> {
   }
   const fence = code.match(/\/\/ @useResponsiveText-begin[\s\S]*?\/\/ @useResponsiveText-end/);
   if (fence && fence.index !== undefined) ranges.push([fence.index, fence.index + fence[0].length]);
+  // Overlay runtime effects (overlay-gen.ts): the RELATIVE positioner reads
+  // `window.innerWidth` for the responsive band and listens to resize/scroll;
+  // the FIXED modal effect locks body scroll. Both end on the overlay's own
+  // `[<x>Open]` dependency array. They are generator output in BOTH forms
+  // (page: document-scoped; component master: `ovFind`-scoped) — the first
+  // shipped rules flagged the builder's own hover overlay (2026-09-06).
+  const effectRe = /use(?:Layout)?Effect\(\(\) => \{[\s\S]*?\}, \[\w+Open\]\);/g;
+  let em: RegExpExecArray | null;
+  while ((em = effectRe.exec(code)) !== null) {
+    if (/data-overlay|prevOverflow|getBoundingClientRect/.test(em[0])) ranges.push([em.index, em.index + em[0].length]);
+  }
   return ranges;
 }
 
@@ -416,7 +427,7 @@ export function checkHandlerBodies(
   if (kind !== 'page' && kind !== 'component' && kind !== 'template') return;
   if (isCodeComponentSource(code)) return;
   const seen = new Set<string>();
-  const ALLOWED_CALLEES = /^(set[A-Z_$]|setTimeout$|clearTimeout$|animate$)/;
+  const ALLOWED_CALLEES = /^(set[A-Z_$]|setTimeout$|clearTimeout$|animate$|ovFind$)/;
 
   traverse(ast, {
     JSXAttribute(path) {
@@ -434,6 +445,13 @@ export function checkHandlerBodies(
       const expr = val.expression;
       if (t.isIdentifier(expr)) return;                      // bare event-prop fire
       if (!t.isArrowFunctionExpression(expr) && !t.isFunctionExpression(expr)) return;
+      // The overlay HOVER BRIDGE (overlay-gen buildOverlayHandlerAttr /
+      // buildOverlayHoverMirrorAttr): enter cancels a grace timer, leave arms
+      // it unless the cursor moved onto the paired element. Page form keys
+      // `window.__ovGrace`, component-master form a per-instance `ovGrace`
+      // ref + `ovFind`. Both are readable — the Overlay tool owns them.
+      const attrText = code.slice(path.node.start ?? 0, path.node.end ?? 0);
+      if (/__ovGrace|ovGrace\.current/.test(attrText) && /set\w+Open\(/.test(attrText)) return;
 
       let offender: string | null = null;
       let offenderLine: number | undefined;

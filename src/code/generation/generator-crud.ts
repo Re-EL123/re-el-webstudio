@@ -12,6 +12,7 @@ import { toKebab, htmlToJSX, splitStyleProps } from '@/shared/css-utils';
 import { cssTransformToMotionProps } from '@/shared/motion-transform';
 import { removeAxisTranslate } from '@/shared/position-utils';
 import { trace } from '@/shared/debug-trace';
+import { findVariantRootId } from '@/shared/variant-root';
 import { sweepEmptyGlideWrappers } from './glide-gen';
 import { generate, findTagClose, findJSXDataIdIndex, quoteStyleValue, serializeJSXAttr, findMatchingCloseTagIndex, findStyleObjectEnd } from './generator-utils';
 import { moveNodeIntoParentFast } from './move-fast';
@@ -38,12 +39,39 @@ function isMotionElementAt(code: string, nodeId: string): boolean {
   return /^<motion\./.test(code.slice(tagStart, tagStart + 12));
 }
 
+
+/** Style-object key as source text: CSS custom properties (`--x`) are not
+ *  valid identifiers and must be quoted (`'--x'`); the fast writer used to
+ *  emit them bare — an unparseable file (live find 2026-09-06 while routing
+ *  the overlay border through motion-animated variables). */
+function styleKeyLiteral(key: string): string {
+  return key.startsWith('--') ? `'${key}'` : key;
+}
+
 export function updateNodeInCode(
   code: string,
   nodeId: string,
   styleChanges: Record<string, string>
 ): string {
   trace.fn('generator.updateNodeInCode', { nodeId, styles: styleChanges });
+
+  // A component master's variant ROOT keeps its canvas position in
+  // variantConfig x/y — never as inline insets (an instance spreads
+  // `position: relative` + size over the root but cannot clear insets, so a
+  // baked `left`/`top` shifts every live instance by the tile offset; live
+  // find 2026-09-06). Strip insets for the root here, whatever the caller.
+  if (code.includes('variantConfig') && findVariantRootId(code) === nodeId) {
+    const stripped: Record<string, string> = {};
+    for (const [k, v] of Object.entries(styleChanges)) {
+      if (k === 'left' || k === 'top' || k === 'right' || k === 'bottom') continue;
+      stripped[k] = v;
+    }
+    if (Object.keys(stripped).length !== Object.keys(styleChanges).length) {
+      trace.action('generator:updateNodeInCode:variant-root-insets-stripped', { nodeId });
+      if (Object.keys(stripped).length === 0) return code;
+      styleChanges = stripped;
+    }
+  }
 
   // On a motion.* element (component), a CSS `transform: rotate()/scale()` in
   // the INLINE style fights motion's layout FLIP projection (both write the
@@ -259,7 +287,7 @@ function updateNodeInCodeFast(
       const spreadIdx = newStyleContent.search(/\.\.\.[A-Za-z_$]/);
       if (spreadIdx !== -1) {
         newStyleContent = newStyleContent.slice(0, spreadIdx)
-          + `${key}: ${quotedNew}, `
+          + `${styleKeyLiteral(key)}: ${quotedNew}, `
           + newStyleContent.slice(spreadIdx);
       } else {
         let end = newStyleContent.length;
@@ -267,8 +295,8 @@ function updateNodeInCodeFast(
         const body = newStyleContent.slice(0, end);
         const tail = newStyleContent.slice(end);
         newStyleContent = body.trim().length === 0
-          ? `${key}: ${quotedNew}`
-          : body + (body.endsWith(',') ? ' ' : ', ') + `${key}: ${quotedNew}` + tail;
+          ? `${styleKeyLiteral(key)}: ${quotedNew}`
+          : body + (body.endsWith(',') ? ' ' : ', ') + `${styleKeyLiteral(key)}: ${quotedNew}` + tail;
       }
       continue;
     }
@@ -346,7 +374,8 @@ function updateNodeInCodeAST(
       } else {
         // Insert BEFORE any SpreadElement (e.g. ...style) so spreads stay last
         const spreadIdx = expr.properties.findIndex(p => p.type === 'SpreadElement');
-        const newProp = t.objectProperty(t.identifier(key), t.stringLiteral(value));
+        // A CSS custom property (`--x`) is not a valid identifier — quote it.
+        const newProp = t.objectProperty(key.startsWith('--') ? t.stringLiteral(key) : t.identifier(key), t.stringLiteral(value));
         if (spreadIdx !== -1) {
           expr.properties.splice(spreadIdx, 0, newProp);
         } else {
@@ -3037,7 +3066,7 @@ export type AddNodeDef = { id: string; type: string; styles: Record<string, stri
 export function buildNodeJSX(node: AddNodeDef, isComponentFile: boolean, indent: string = '      '): string {
   const styleEntries = Object.entries(node.styles)
     .filter(([, v]) => v !== '')
-    .map(([k, v]) => `${k}: ${quoteStyleValue(v)}`)
+    .map(([k, v]) => `${styleKeyLiteral(k)}: ${quoteStyleValue(v)}`)
     .join(', ');
   const nameAttr = node.name ? ` data-name="${sanitizeDataName(node.name)}"` : '';
   // Build HTML attributes (src, alt, controls, ref, etc.). `ref` (and
@@ -3259,7 +3288,7 @@ export function addCanvasNodeInCode(
 
   // Build JSX string for the canvas node — inject data-canvas-node manually
   const styleEntries = Object.entries(node.styles)
-    .map(([k, v]) => `${k}: ${quoteStyleValue(v)}`)
+    .map(([k, v]) => `${styleKeyLiteral(k)}: ${quoteStyleValue(v)}`)
     .join(', ');
   const nameAttr = node.name ? ` data-name="${sanitizeDataName(node.name)}"` : '';
   const attrsStr = node.attrs

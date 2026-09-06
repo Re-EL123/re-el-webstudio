@@ -161,6 +161,16 @@ const SHORTHAND_OVERRIDE_ALIASES: Record<string, string[]> = {
   padding: ['padding', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'],
   margin: ['margin', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft'],
   borderRadius: ['borderRadius', 'borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomRightRadius', 'borderBottomLeftRadius'],
+  // Border row: a per-variant border lands as inline longhands (inline mode)
+  // or as the OVERLAY border's motion-animated custom properties (`--rvb-*`,
+  // see editor/ui/border-overlay-vars.ts) — never as `border` itself, so the
+  // label stayed unlit and Reset Override unreachable on a variant whose
+  // border plainly differed from the primary's (user report 2026-09-06).
+  border: ['border', 'borderWidth', 'borderStyle', 'borderColor',
+    'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+    'borderTopStyle', 'borderRightStyle', 'borderBottomStyle', 'borderLeftStyle',
+    'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor',
+    '--rvb-bw', '--rvb-bs', '--rvb-bc'],
 };
 
 /** Keys that count as overriding a given control property (camelCase, the

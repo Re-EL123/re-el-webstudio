@@ -7,6 +7,7 @@ import { isComponentFilePath, isIconSetFilePath, isVectorSetComponentFile } from
 import { parseIconSetConfig, iconConfigPx } from '@/code/icons/icon-set-config';
 import { updateIconPosition, updateIconSize } from '@/code/icons/icon-set-ops';
 import { projectFS } from '@/code/project/project-fs';
+import { parseVariantConfig } from '@/code/variants/variant-config';
 import { syncQueueCode, queueMutation, flushNow } from '@/code/mutation/mutation-queue';
 import { bakeStylesForTile, tileContextFor } from '@/canvas/replica-bake';
 import { getViewportWidths } from '@/code/stores/viewport-store';
@@ -604,6 +605,44 @@ export function applySymmetricResize(
 /**
  * Determine which CSS properties to commit after resize, based on pin state.
  */
+
+/** Is this node a component master's variant ROOT (a tile)? Top-level, not a
+ *  free canvas node, not an overlay — the rule the parser's variantConfig merge
+ *  and component-navigation's findRootId share. Pure; exported for tests. */
+export function isComponentVariantRootNode(
+  node: { parentId?: string | null; isCanvasNode?: boolean; attrs?: Record<string, string> } | null | undefined,
+): boolean {
+  return !!node && !node.parentId && !node.isCanvasNode && !node.attrs?.['data-overlay'];
+}
+
+
+/** Variant tiles that INHERIT the resized axis from the primary (no own
+ *  `width` / `height` in their variants entry) must move by the same delta the
+ *  primary's tile moved when a west/north handle kept the opposite corner
+ *  anchored — otherwise they grow from their own top-left and appear to grow
+ *  in the OPPOSITE direction ("synced variants resize the wrong way",
+ *  2026-09-06). Returns the shifted positions for every affected sibling.
+ *  Pure; exported for tests. */
+export function computeSiblingVariantShifts(
+  configs: { name: string; x: number; y: number }[],
+  motionVariants: Record<string, Record<string, unknown>> | undefined,
+  resizedName: string,
+  dx: number,
+  dy: number,
+): { variantName: string; x: number; y: number }[] {
+  if (resizedName !== 'default' || (dx === 0 && dy === 0)) return [];
+  const out: { variantName: string; x: number; y: number }[] = [];
+  for (const cfg of configs) {
+    if (cfg.name === resizedName) continue;
+    const entry = motionVariants?.[cfg.name] ?? {};
+    const shiftX = dx !== 0 && entry.width === undefined;
+    const shiftY = dy !== 0 && entry.height === undefined;
+    if (!shiftX && !shiftY) continue;
+    out.push({ variantName: cfg.name, x: cfg.x + (shiftX ? dx : 0), y: cfg.y + (shiftY ? dy : 0) });
+  }
+  return out;
+}
+
 export function getResizeCommitProperties(
   styles: { width: string; height: string; left: string; right: string; top: string; bottom: string },
   pins: { left: boolean; right: boolean; top: boolean; bottom: boolean },
@@ -1893,6 +1932,26 @@ export function startResize(
   const isVpNode = nodeAttrs['data-viewport'] !== undefined
     || nodeId === 'root'
     || nodeId === 'layout::root';
+  // Component MASTER root = a variant tile even though `isVpNode` misses it
+  // (`data-viewport` is a paint-time DOM stamp, skipped by the parser). Its
+  // position lives in variantConfig; the commit must never write its insets.
+  const isVariantRootTile = isComponentFilePath(getActiveFilePath()) && isComponentVariantRootNode(getNodeFromCache(nodeId));
+  // Primary-tile resize: siblings that INHERIT the resized axis must follow
+  // the primary's position delta LIVE (not only at commit) — otherwise they
+  // grow from their own top-left during the drag and jump on mouse-up
+  // (2026-09-06). Captured once; `computeSiblingVariantShifts` does the math.
+  const siblingShiftInputs = (isVariantRootTile && isPrimaryViewport(vpId))
+    ? { configs: parseVariantConfig(projectFS.readFile(getActiveFilePath()) ?? ''), mv: getNodeFromCache(nodeId)?.motionVariants as Record<string, Record<string, unknown>> | undefined }
+    : null;
+  const patchSiblingTilesLive = (dx: number, dy: number): void => {
+    if (!siblingShiftInputs) return;
+    for (const sh of computeSiblingVariantShifts(siblingShiftInputs.configs, siblingShiftInputs.mv, 'default', dx, dy)) {
+      const styles: Record<string, string> = {};
+      if (dx !== 0) styles.left = `${sh.x}px`;
+      if (dy !== 0) styles.top = `${sh.y}px`;
+      patchNodeStyles(contentEl, nodeId, getViewportPrefix(sh.variantName), styles);
+    }
+  };
 
   trace.action('resize:start', { nodeId, vpId, direction, startWidth, startHeight, hasTransform, pins: inset.pins, insetMode: inset.mode, insetStyles, isCenteredX, isCenteredY, isPercentX, isPercentY });
   onInteracting(true);
@@ -2563,6 +2622,9 @@ export function startResize(
       }
     }
 
+    // Synced sibling variant tiles follow the primary's live position delta.
+    if (siblingShiftInputs) patchSiblingTilesLive(Math.round(newLeft - startLeft), Math.round(newTop - startTop));
+
     // Mirror live resize to all viewports via updateNodeStyles domOnly mode.
     // This syncs dimensions (and position for pages) to all replicas via bridge.
     //
@@ -2692,7 +2754,7 @@ export function startResize(
           !!isFixedTop,
           !!inset.horizontalInset,
           !!inset.verticalInset,
-          isVpNode,
+          isVpNode || isVariantRootTile,
           direction,
           wrotePctLeft,
           wrotePctTop,
@@ -2767,8 +2829,17 @@ export function startResize(
     setVpHeadersHidden(false);
 
     // Capture variant position BEFORE committing (liveStyles has the updated left/top from resize)
+    //
+    // A component MASTER root is a variant tile whether or not `isVpNode` says
+    // so: `isVpNode` reads `data-viewport` from PARSED attrs, but that attribute
+    // is stamped by the Renderer at paint time only (and the parser skips it),
+    // so a master root failed the check, fell through as a plain absolute box,
+    // committed its live `left`/`top` INTO the file and never updated
+    // variantConfig. Every live instance then rendered shifted by the tile
+    // offset (live find 2026-09-06). Detect the root by shape instead — the
+    // same rule the parser's variantConfig merge and component-navigation use.
     let pendingVariantPos: { variantName: string; x: number; y: number } | null = null;
-    if (isCompFile && isVpNode && callbacks.onVariantPositionUpdate) {
+    if (isCompFile && (isVpNode || isVariantRootTile) && callbacks.onVariantPositionUpdate) {
       const variantVpId = nodeAttrs['data-viewport'] || vpId;
       pendingVariantPos = {
         variantName: variantVpId === 'desktop' ? 'default' : variantVpId,
@@ -2864,6 +2935,14 @@ export function startResize(
     // Update variantConfig position AFTER cleanup so re-renders don't interrupt resize state
     if (pendingVariantPos && callbacks.onVariantPositionUpdate) {
       callbacks.onVariantPositionUpdate(pendingVariantPos.variantName, pendingVariantPos.x, pendingVariantPos.y);
+      // Siblings that inherit the resized axis move by the same delta (see
+      // computeSiblingVariantShifts) so every synced tile grows the same way.
+      const dx = pendingVariantPos.x - Math.round(startLeft);
+      const dy = pendingVariantPos.y - Math.round(startTop);
+      const configs = parseVariantConfig(projectFS.readFile(getActiveFilePath()) ?? '');
+      const shifts = computeSiblingVariantShifts(configs, getNodeFromCache(nodeId)?.motionVariants as any, pendingVariantPos.variantName, dx, dy);
+      for (const sh of shifts) callbacks.onVariantPositionUpdate(sh.variantName, sh.x, sh.y);
+      if (shifts.length) trace.action('resize:sibling-variant-shift', { nodeId, dx, dy, shifts });
     }
   };
 

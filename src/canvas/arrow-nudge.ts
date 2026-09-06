@@ -23,6 +23,8 @@ import { getDefaultStore } from 'jotai';
 import { containerOverridesAtom } from '@/code/stores/container-query-store';
 import { isComponentFilePath } from '@/code/project/active-file-store';
 import { bakeStylesForTile, tileContextFor } from './replica-bake';
+import { resolveOverlayConfig } from '@/code/parsing/overlay-parser';
+import type { OverlayConfig } from '@/shared/types';
 
 export type NudgeDirection = 'up' | 'down' | 'left' | 'right';
 
@@ -222,10 +224,65 @@ export interface NudgeContext {
  * Mutations are queued + flushed immediately; the DOM is also patched via the
  * bridge for instant visual feedback.
  */
+// ─── Pure: overlay offset nudge ─────────────────────────────────────────────
+
+/**
+ * An OVERLAY is `position: fixed` but its placement is not left/top — the
+ * runtime derives it from the trigger rect + the overlay config's offset. So
+ * an arrow press on a selected overlay must nudge `offsetX` / `offsetY`,
+ * routed exactly like the overlay drag commit: primary tile → base config,
+ * component variant tile → that variant's override, page replica → that
+ * width's override. (Before: the absolute path wrote left/top, which the
+ * portal placement ignored — "arrows do nothing on a selected overlay",
+ * live find 2026-09-06.)
+ */
+export function computeOverlayNudge(
+  config: OverlayConfig,
+  direction: NudgeDirection,
+  step: number,
+  tile: { vpId: string; vpWidth: number; isPrimary: boolean; isComponentFile: boolean },
+): { patch: { offsetX: number; offsetY: number }; vpWidth: number | null; variant: string | null } {
+  const eff = tile.isPrimary
+    ? { offsetX: config.offsetX ?? 0, offsetY: config.offsetY ?? 0 }
+    : resolveOverlayConfig(config, tile.vpId, tile.vpWidth);
+  const dx = direction === 'left' ? -step : direction === 'right' ? step : 0;
+  const dy = direction === 'up' ? -step : direction === 'down' ? step : 0;
+  const variant = (!tile.isPrimary && tile.isComponentFile) ? tile.vpId : null;
+  return {
+    patch: { offsetX: (eff.offsetX ?? 0) + dx, offsetY: (eff.offsetY ?? 0) + dy },
+    vpWidth: variant ? null : (tile.isPrimary ? null : tile.vpWidth),
+    variant,
+  };
+}
+
 export function nudgeSelection(direction: NudgeDirection, step: number, ctx: NudgeContext): void {
   const { selectedIds, nodes, contentEl, vpId } = ctx;
   if (selectedIds.length === 0) return;
   trace.action('arrow-nudge:start', { direction, step, count: selectedIds.length, vpId });
+
+  // Single OVERLAY selection → offset nudge (config write, not left/top).
+  if (selectedIds.length === 1) {
+    const ovNode = nodes.get(selectedIds[0]);
+    const rawCfg = ovNode?.attrs?.['data-overlay'];
+    if (ovNode && rawCfg) {
+      let config: OverlayConfig | null = null;
+      try { config = JSON.parse(rawCfg) as OverlayConfig; } catch { config = null; }
+      if (config) {
+        const widths = getViewportWidths();
+        const isPrimary = isPrimaryViewport(vpId);
+        const { patch, vpWidth, variant } = computeOverlayNudge(config, direction, step, {
+          vpId, vpWidth: widths[vpId] ?? 0, isPrimary, isComponentFile: isComponentFilePath(getActiveFilePath()),
+        });
+        queueMutation({
+          type: 'updateOverlayConfig', overlayId: ovNode.id, patch,
+          vpWidth, variant, breakpoints: Object.values(widths),
+        });
+        flushNow();
+        trace.action('arrow-nudge:overlay-offset', { id: ovNode.id, direction, step, patch, vpWidth, variant });
+        return;
+      }
+    }
+  }
 
   // Single layout-child selection → ORDER nudge (multi-select reorder is
   // ambiguous, so it falls through to the absolute path which no-ops on

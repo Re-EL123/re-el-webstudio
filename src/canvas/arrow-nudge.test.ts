@@ -13,7 +13,7 @@ vi.mock('@/shared/debug-trace', () => ({
   trace: { action: vi.fn(), fn: vi.fn(), dom: vi.fn(), error: vi.fn() },
 }));
 
-import { computeAbsoluteNudge, computeOrderNudge, computeFlowSiblingOrder, queuePendingUpdates } from './arrow-nudge';
+import { computeAbsoluteNudge, computeOrderNudge, computeFlowSiblingOrder, queuePendingUpdates, computeOverlayNudge } from './arrow-nudge';
 import { queueMutation } from '@/code/mutation/mutation-queue';
 import { trace } from '@/shared/debug-trace';
 import type { PendingUpdate } from '@/shared/types';
@@ -372,5 +372,28 @@ describe('computeFlowSiblingOrder', () => {
   it('the first flow child still cannot move up past the start', () => {
     const ids = computeFlowSiblingOrder([at('fk', 160), at('d6', 300)], 'column');
     expect(computeOrderNudge('fk', ids, 'up', 'column')).toBeNull();
+  });
+});
+
+// ─── overlay offset nudge ────────────────────────────────────────────────────
+describe('computeOverlayNudge', () => {
+  const cfg: any = { type: 'relative', triggerId: 't', side: 'top', align: 'center', offsetX: 0, offsetY: -11,
+    responsiveVariant: { 'default-hover': { offsetX: 5, offsetY: 5 } }, responsive: { 768: { offsetX: 2, offsetY: 2 } }, responsiveBp: [768, 375] };
+  it('primary tile: nudges the BASE offset, routed to base', () => {
+    const r = computeOverlayNudge(cfg, 'left', 10, { vpId: 'desktop', vpWidth: 1440, isPrimary: true, isComponentFile: true });
+    expect(r).toEqual({ patch: { offsetX: -10, offsetY: -11 }, vpWidth: null, variant: null });
+  });
+  it('component variant tile: starts from that variant override and routes per-variant', () => {
+    const r = computeOverlayNudge(cfg, 'down', 1, { vpId: 'default-hover', vpWidth: 0, isPrimary: false, isComponentFile: true });
+    expect(r).toEqual({ patch: { offsetX: 5, offsetY: 6 }, vpWidth: null, variant: 'default-hover' });
+  });
+  it('page replica: starts from the width override and routes per-width', () => {
+    const r = computeOverlayNudge(cfg, 'right', 10, { vpId: 'tablet', vpWidth: 768, isPrimary: false, isComponentFile: false });
+    expect(r).toEqual({ patch: { offsetX: 12, offsetY: 2 }, vpWidth: 768, variant: null });
+  });
+  it('replica WITHOUT its own override starts from the base (inherits) and still routes per-width', () => {
+    const r = computeOverlayNudge(cfg, 'up', 1, { vpId: 'mobile', vpWidth: 375, isPrimary: false, isComponentFile: false });
+    expect(r.patch).toEqual({ offsetX: 0, offsetY: -12 });
+    expect(r.vpWidth).toBe(375);
   });
 });

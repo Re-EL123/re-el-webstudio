@@ -200,6 +200,8 @@ import { getSortedBreakpointWidths } from '../stores/viewport-store';
 import { transformAllResponsiveAttrs } from '../components/instance-prop-overrides';
 import { rewriteListConfigBreakpoints, addListConfigBreakpoint, removeListConfigBreakpoint } from './cms-responsive-gen';
 import { trace } from '@/shared/debug-trace';
+import { findVariantRootId } from '@/shared/variant-root';
+import { ensureRootDataVariantAttr } from './locale-gen';
 import { findTagClose, findJSXDataIdIndex, quoteStyleValue, findStyleObjectEnd, findMatchingCloseTagIndex, findSubtreeRange, findBalancedBraceEnd } from './generator-utils';
 import { updateNodeInCode } from './generator-crud';
 import { isIndexInsideSlotConst } from './slot-ops';
@@ -1262,8 +1264,29 @@ export function mergeDetachedStyleCSSIntoPage(pageCode: string, css: string): st
   return createStyleBlockInCode(pageCode, chunk);
 }
 
-export function updateBorderOverlayStyle(code: string, nodeId: string, afterCSS: string): string {
-  trace.fn('generator.updateBorderOverlayStyle', { nodeId, cssLen: afterCSS.length });
+/** Selector of a node's border-overlay `::after` rule. BASE: `[data-id="X"]::after`.
+ *  PER-VARIANT (design-component variant `v`, never 'default'): the tile /
+ *  master root carries `data-variant` (canvas: Renderer stamps every tile
+ *  root and instance root; live: the root's `data-variant={variant}` attr), so
+ *  the rule is scoped as `[data-variant="v"] [data-id="X"]::after` (X is a
+ *  child) + `[data-id="X"][data-variant="v"]::after` (X IS the root). Its
+ *  specificity (0,2,1) beats the base rule, so a variant can carry its own
+ *  border while the others keep the base — reference parity (2026-09-06).
+ *  ORDER MATTERS: the descendant form goes first so the base-rule regexes
+ *  (`[data-id="X"]::after\s*{`) can never match inside this rule — there the
+ *  id bracket is followed by `,` or `[data-variant`, not `{`. */
+export function borderOverlaySelector(nodeId: string, variant?: string | null): string {
+  if (!variant || variant === 'default') return `[data-id="${nodeId}"]::after`;
+  return `[data-variant="${variant}"] [data-id="${nodeId}"]::after, [data-id="${nodeId}"][data-variant="${variant}"]::after`;
+}
+
+function borderOverlayVariantRuleRegex(nodeId: string, variant: string): RegExp {
+  const id = escapeRegExp(nodeId); const v = escapeRegExp(variant);
+  return new RegExp(`\\s*\\[data-variant="${v}"\\] \\[data-id="${id}"\\]::after,\\s*\\[data-id="${id}"\\]\\[data-variant="${v}"\\]::after\\s*\\{[^}]*\\}`, 's');
+}
+
+export function updateBorderOverlayStyle(code: string, nodeId: string, afterCSS: string, variant?: string | null): string {
+  trace.fn('generator.updateBorderOverlayStyle', { nodeId, cssLen: afterCSS.length, variant: variant ?? null });
 
   const styleBlockRegex = /(<style>\s*\{[`'])([\s\S]*?)([`']\}\s*<\/style>)/s;
   const blockMatch = styleBlockRegex.exec(code);
@@ -1272,13 +1295,17 @@ export function updateBorderOverlayStyle(code: string, nodeId: string, afterCSS:
   // ONLY in the canvas, never on the live site). The editor element also carries `data-id`, so this
   // works everywhere.
   const nodeIdEsc = escapeRegExp(nodeId);
-  const selector = `[data-id="${nodeId}"]::after`;
+  const isVariantRule = !!variant && variant !== 'default';
+  const selector = borderOverlaySelector(nodeId, variant);
 
   let existingCSS = blockMatch ? blockMatch[2] : '';
 
   // Replace any existing ::after rule for this node — match BOTH `data-id` AND legacy `data-node-id`
   // so an old (canvas-only) rule MIGRATES to `data-id` on the next write.
-  const ruleRegex = new RegExp(`\\s*\\[data-(?:node-)?id="${nodeIdEsc}"\\]::after\\s*\\{[^}]*\\}`, 's');
+  const ruleRegex = isVariantRule
+    ? borderOverlayVariantRuleRegex(nodeId, variant!)
+    : new RegExp(`\\s*\\[data-(?:node-)?id="${nodeIdEsc}"\\]::after\\s*\\{[^}]*\\}`, 's');
+  if (isVariantRule) code = ensureRootDataVariantAttr(code);
   if (ruleRegex.test(existingCSS)) {
     existingCSS = existingCSS.replace(ruleRegex, `\n    ${selector} {\n${afterCSS}\n    }`);
   } else {
@@ -1296,16 +1323,19 @@ export function updateBorderOverlayStyle(code: string, nodeId: string, afterCSS:
 /**
  * Remove the ::after border overlay rule for a node from the <style> block.
  */
-export function removeBorderOverlayStyle(code: string, nodeId: string): string {
-  trace.fn('generator.removeBorderOverlayStyle', { nodeId });
+export function removeBorderOverlayStyle(code: string, nodeId: string, variant?: string | null): string {
+  trace.fn('generator.removeBorderOverlayStyle', { nodeId, variant: variant ?? null });
 
   const styleBlockRegex = /(<style>\s*\{[`'])([\s\S]*?)([`']\}\s*<\/style>)/s;
   const blockMatch = styleBlockRegex.exec(code);
   if (!blockMatch) return code;
 
-  // Remove the node's ::after rule in EITHER form (`data-id` new / `data-node-id` legacy).
+  // Remove the node's ::after rule in EITHER form (`data-id` new / `data-node-id` legacy) —
+  // or ONLY this variant's scoped rule when a variant is given.
   const nodeIdEsc = escapeRegExp(nodeId);
-  const ruleRegex = new RegExp(`\\s*\\[data-(?:node-)?id="${nodeIdEsc}"\\]::after\\s*\\{[^}]*\\}`, 's');
+  const ruleRegex = (variant && variant !== 'default')
+    ? borderOverlayVariantRuleRegex(nodeId, variant)
+    : new RegExp(`\\s*\\[data-(?:node-)?id="${nodeIdEsc}"\\]::after\\s*\\{[^}]*\\}`, 's');
 
   const newCSS = blockMatch[2].replace(ruleRegex, '');
   const [fullMatch, prefix, , suffix] = blockMatch;
@@ -1899,7 +1929,11 @@ function readBaseValuesForNode(
     // `rotate: 14.1` are unquoted). ANCHORED at a key boundary — an
     // unanchored `x\s*:` matched the trailing x of `transformBox:` and read
     // its value ('fill-box') as the x base (live find 2026-06-11).
-    const propRegex = new RegExp(`(?:^|[,{\\s])${prop}\\s*:\\s*(?:'([^']*)'|"([^"]*)"|(-?\\d+(?:\\.\\d+)?))`);
+    // Custom properties are QUOTED in the style object (`'--rvb-bw': '61px'`) —
+    // accept the optional quote around the key, else the animate-back seed
+    // silently skipped them (motion-animated overlay border, 2026-09-06).
+    const keyText = prop.startsWith('--') ? `['"]?${escapeRegExp(prop)}['"]?` : prop;
+    const propRegex = new RegExp(`(?:^|[,{\\s])${keyText}\\s*:\\s*(?:'([^']*)'|"([^"]*)"|(-?\\d+(?:\\.\\d+)?))`);
     const m = styleContent.match(propRegex);
     if (m) { result[prop] = m[1] ?? m[2] ?? m[3] ?? ''; continue; }
     // SVG presentation base from the tag's attrs (see attrBase above).
@@ -2203,6 +2237,8 @@ export function healSparseVariantDefaults(code: string): string {
   return healed;
 }
 
+
+
 export function updateVariantStyleInCode(
   code: string,
   nodeId: string,
@@ -2393,15 +2429,7 @@ function updateVariantStyleInCodeInner(
   // Variant roots have position managed by variantConfig (x, y), not CSS left/top.
   // These values leak from the Renderer's canvas layout and should NOT go to code.
   const CANVAS_ONLY_PROPS = new Set(['left', 'top', 'right', 'bottom', 'position']);
-  const isRootNode = !code.includes(`"${nodeId}"`) || (() => {
-    // Check if this node is a root (no parent in the component) by seeing if it's the
-    // first data-id in the return statement
-    const returnIdx = code.indexOf('return');
-    if (returnIdx === -1) return false;
-    const afterReturn = code.slice(returnIdx);
-    const firstDataId = afterReturn.match(/data-id="([^"]*)"/);
-    return firstDataId?.[1] === nodeId;
-  })();
+  const isRootNode = !code.includes(`"${nodeId}"`) || findVariantRootId(code) === nodeId;
   if (isRootNode) {
     const filtered: Record<string, string> = {};
     for (const [k, v] of Object.entries(styles)) {

@@ -410,3 +410,14 @@ describe(':lang rules are NOT regular overrides', () => {
     expect(card.get('border-radius')).toBeUndefined();
   });
 });
+
+// Border row override detection: inline longhands OR the overlay border's
+// motion variables count as a per-variant/per-viewport border override.
+import { overrideAliasKeys as _aliasKeys } from './container-query-store';
+describe('overrideAliasKeys — border', () => {
+  it('covers inline longhands and the --rvb-* overlay variables', () => {
+    const keys = _aliasKeys('border');
+    for (const k of ['border', 'borderWidth', 'borderTopWidth', 'borderLeftColor', '--rvb-bw', '--rvb-bs', '--rvb-bc']) expect(keys).toContain(k);
+    expect(_aliasKeys('gap')).toEqual(['gap']);
+  });
+});

@@ -2648,3 +2648,106 @@ describe('removeOverlay — compound / rewritten condition', () => {
     expect(removed).not.toContain("variant !== 'default'");
   });
 });
+
+// ─── instance-scoped runtime in a component MASTER (2026-09-06) ─────────────
+// Two instances of a master rendered the same overlay id twice and the root
+// trigger's data-id is the INSTANCE id, so document-scoped lookups opened the
+// FIRST instance's overlay from the duplicate. Masters now scope every lookup
+// to their own root (`ovRootRef` / `ovFind`) and key grace timers per instance.
+describe('createOverlayInCode — component master scoping', () => {
+  const MASTER = `'use client';
+import React, { useState, useEffect } from 'react';
+import { motion, LayoutGroup } from 'framer-motion';
+import { withResponsiveProps } from '@revyme/runtime';
+const variantConfig = [{ name: 'default', label: 'Frame', x: 0, y: 0, isPrimary: true }];
+function MyComp({ style, initialVariant = 'default', ...rest }: { style?: React.CSSProperties; initialVariant?: string; [key: string]: any }) {
+  const [variant, setVariant] = useState(initialVariant);
+  useEffect(() => { setVariant(initialVariant); }, [initialVariant]);
+  return <LayoutGroup>
+    <motion.div data-id="root-comp" {...rest} data-mroot="root-comp" data-name="Frame" style={{ position: 'absolute', width: '300px', height: '500px', ...style }} animate={variant}>
+      <motion.div data-id="card1" style={{ width: '120px', height: '80px' }}></motion.div>
+    </motion.div>
+  </LayoutGroup>;
+}
+export default withResponsiveProps(MyComp);`;
+
+  test('root trigger, hover: ref on root before {...rest}, ovFind everywhere, per-instance grace', () => {
+    const out = createOverlayInCode(MASTER, 'root-comp', 'ov1', makeOverlayConfig({ triggerId: 'root-comp' }), makeTriggerConfig({ trigger: 'hover' }));
+    expectParses(out);
+    expect(out).toMatch(/data-id="root-comp"\s+ref=\{ovRootRef\} \{\.\.\.rest\}/);
+    expect(out).toContain('const ovRootRef = useRef(null);');
+    expect(out).toContain('const ovGrace = useRef({});');
+    expect(out).toContain('const ovFind = (id) =>');
+    expect(out).toMatch(/import React, \{[^}]*useRef[^}]*\} from 'react'/);
+    expect(out).toContain("ovFind('ov1')");
+    expect(out).toContain('ovFind(cfg.triggerId)');
+    expect(out).toContain('ovFind(tid)');
+    expect(out).toContain("ovGrace.current['ov1']");
+    expect(out).not.toContain("document.querySelector('[data-id=\"ov1\"]')");
+    expect(out).not.toContain('__ovGrace');
+    // idempotent: a second overlay on a child does not re-declare the plumbing
+    const out2 = createOverlayInCode(out, 'card1', 'ov2', makeOverlayConfig({ triggerId: 'card1' }), makeTriggerConfig({ trigger: 'click' }));
+    expectParses(out2);
+    expect(out2.match(/const ovRootRef = useRef\(null\);/g)?.length).toBe(1);
+    expect(out2.match(/ref=\{ovRootRef\}/g)?.length).toBe(1);
+  });
+
+  test('page output is unchanged (document-scoped, window grace)', () => {
+    const out = createOverlayInCode(BASE_CODE, 'card1', 'dropdown1', makeOverlayConfig(), makeTriggerConfig({ trigger: 'hover' }));
+    expect(out).toContain("document.querySelector('[data-id=\"dropdown1\"]')");
+    expect(out).toContain('__ovGrace');
+    expect(out).not.toContain('ovRootRef');
+  });
+
+  test('a master WITHOUT {...rest} on a data-id tag still gets the finder (no ref, document fallback)', () => {
+    const noRest = MASTER.replace(' {...rest} data-mroot="root-comp"', '').replace(', ...rest }', ' }').replace('; [key: string]: any', '');
+    const out = createOverlayInCode(noRest, 'card1', 'ov1', makeOverlayConfig({ triggerId: 'card1' }), makeTriggerConfig());
+    expectParses(out);
+    expect(out).not.toContain('ovRootRef'); // not a master by the {...rest} signal → page form
+  });
+});
+
+describe('component master scoping — oracle + parser round trip', () => {
+  test('generated master passes the oracle (no tier ≥ 2) and parses with the root marker + ref', async () => {
+    const { checkFile } = await import('@/code/oracle/check-file');
+    const { parseJSXToNodes } = await import('@/code/parsing/parser');
+    const MASTER = `'use client';
+import React, { useState, useEffect } from 'react';
+import { motion, LayoutGroup } from 'framer-motion';
+import { withResponsiveProps } from '@revyme/runtime';
+const variantConfig = [{ name: 'default', label: 'Frame', x: 0, y: 0, isPrimary: true }];
+function MyComp({ style, initialVariant = 'default', ...rest }: { style?: React.CSSProperties; initialVariant?: string; [key: string]: any }) {
+  const [variant, setVariant] = useState(initialVariant);
+  useEffect(() => { setVariant(initialVariant); }, [initialVariant]);
+  return <LayoutGroup>
+    <motion.div data-id="root-comp" {...rest} data-mroot="root-comp" data-name="Frame" style={{ position: 'absolute', width: '300px', height: '500px', ...style }} animate={variant}>
+      <motion.div data-id="card1" style={{ width: '120px', height: '80px' }}></motion.div>
+    </motion.div>
+  </LayoutGroup>;
+}
+export default withResponsiveProps(MyComp);`;
+    const withImports = MASTER
+      .replace("import React, { useState, useEffect } from 'react';", "/** @name \"Frame\" */\nimport React, { useState, useEffect, useLayoutEffect } from 'react';")
+      .replace("import { motion, LayoutGroup } from 'framer-motion';", "import { motion, LayoutGroup, AnimatePresence } from 'framer-motion';");
+    const out = createOverlayInCode(withImports, 'root-comp', 'ov1', makeOverlayConfig({ triggerId: 'root-comp' }), makeTriggerConfig({ trigger: 'hover', targetId: 'ov1' }));
+    const bad = checkFile(out, { kind: 'component', path: 'components/MyComp.tsx' }).filter(v => v.tier >= 2);
+    expect(bad.map(v => `${v.code}: ${v.message.slice(0, 120)}`)).toEqual([]);
+    // The PAGE form of the same hover overlay must be clean too (the builder's
+    // own output used to trip RESPONSIVE_JS_HANDWRITTEN / PAGE_HOOK_UNRESOLVED /
+    // INTERACTION_HANDLER_BODY_UNREADABLE — fixed alongside, 2026-09-06).
+    const pageSrc = BASE_CODE.includes("from 'framer-motion'") ? BASE_CODE
+      : BASE_CODE.replace("'use client';", "'use client';\nimport React, { useState, useEffect, useLayoutEffect } from 'react';\nimport { motion, AnimatePresence } from 'framer-motion';");
+    const page = createOverlayInCode(pageSrc, 'card1', 'ov1', makeOverlayConfig({ triggerId: 'card1' }), makeTriggerConfig({ trigger: 'hover', targetId: 'ov1' }));
+    const pageBad = checkFile(page, { kind: 'page', path: 'app/page.client.tsx' })
+      .filter(v => v.tier >= 2 && v.code !== 'CANVAS_CONFIG_MISSING');
+    expect(pageBad.map(v => `${v.code}: ${v.message.slice(0, 120)}`)).toEqual([]);
+    const nodes = parseJSXToNodes(out);
+    const root = nodes.get('root-comp');
+    expect(root).toBeDefined();
+    // `data-mroot` is a SOURCE/DOM contract (runtime + ovFind read the DOM
+    // attribute); the parser keeps only the attrs the editor edits.
+    expect(out).toContain('{...rest} data-mroot="root-comp"');
+    expect(root!.attrs?.ref).toBe('var:ovRootRef');
+    expect(nodes.get('ov1')).toBeDefined();
+  });
+});

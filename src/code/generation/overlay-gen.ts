@@ -4,6 +4,8 @@
 
 import type { OverlayConfig, OverlayConfigOverride, OverlayConfigPatch, OverlayTriggerConfig } from '@/shared/types';
 import { trace } from '@/shared/debug-trace';
+import { ensureNamedImport } from './generator-utils';
+import { insertAtRootRestSpread } from '@/shared/variant-root';
 import { quoteStyleValue, findTagClose, findJSXDataIdIndex, getJsonAttr } from './generator-utils';
 import { parseOverlayCalls, parseOverlayTriggerCalls, resolveOverlayConfig } from '../parsing/overlay-parser';
 import { findCanvasNodesFragmentClose, findExportDefaultEndIdx } from './generator-crud';
@@ -345,7 +347,7 @@ function attrInsertPosBeforeClose(code: string, closePos: number): number {
   return p;
 }
 
-function buildOverlayHandlerAttr(triggerConfig: OverlayTriggerConfig, overlayId: string): string {
+function buildOverlayHandlerAttr(triggerConfig: OverlayTriggerConfig, overlayId: string, scoped = false): string {
   const varName = stateVarName(overlayId);
   const setVarName = `set${varName.charAt(0).toUpperCase() + varName.slice(1)}`;
   // EVENT trigger: the trigger is a component INSTANCE, and the overlay opens when a
@@ -369,17 +371,73 @@ function buildOverlayHandlerAttr(triggerConfig: OverlayTriggerConfig, overlayId:
   // (window.__ovGrace, keyed by overlay id — inline handlers have no ref
   // scope) and any enter on either side cancels it. 180ms crosses any sane
   // gap without feeling laggy.
-  return ` onMouseEnter={() => { ${graceCancelJs(overlayId)} ${setVarName}(true); }} onMouseLeave={(e) => { const ov = document.querySelector('[data-id="${overlayId}"]'); if (ov && e.relatedTarget && ov.contains(e.relatedTarget)) return; ${graceArmJs(overlayId, setVarName)} }}`;
+  return ` onMouseEnter={() => { ${graceCancelJs(overlayId, scoped)} ${setVarName}(true); }} onMouseLeave={(e) => { const ov = ${findLitJs(overlayId, scoped)}; if (ov && e.relatedTarget && ov.contains(e.relatedTarget)) return; ${graceArmJs(overlayId, setVarName, scoped)} }}`;
 }
 
 /** Cancel a pending grace-close for this overlay (runs on either side's enter). */
-function graceCancelJs(overlayId: string): string {
+function graceCancelJs(overlayId: string, scoped = false): string {
+  if (scoped) return `clearTimeout(ovGrace.current['${overlayId}']);`;
   return `clearTimeout(((window as any).__ovGrace ||= {})['${overlayId}']);`;
 }
 
 /** Arm the delayed close — 180ms lets the cursor cross the trigger↔overlay gap. */
-function graceArmJs(overlayId: string, setVarName: string): string {
-  return `const g = ((window as any).__ovGrace ||= {}); clearTimeout(g['${overlayId}']); g['${overlayId}'] = setTimeout(() => ${setVarName}(false), 180);`;
+function graceArmJs(overlayId: string, setVarName: string, scoped = false): string {
+  const map = scoped ? 'ovGrace.current' : '((window as any).__ovGrace ||= {})';
+  return `const g = ${map}; clearTimeout(g['${overlayId}']); g['${overlayId}'] = setTimeout(() => ${setVarName}(false), 180);`;
+}
+
+// ─── Instance-scoped runtime (component masters) ────────────────────────────
+// A master's overlay runtime used `document.querySelector('[data-id="…"]')`
+// for its overlay AND its trigger. Two instances of the master on one page
+// render the same overlay id twice and (for a root trigger) the trigger's
+// data-id is the INSTANCE id — so hovering the duplicate opened the FIRST
+// instance's overlay, positioned on the first trigger (live find 2026-09-06).
+// In a master every lookup goes through `ovFind(id)`, scoped to THIS
+// instance's root element (`ovRootRef`, attached to the root before
+// `{...rest}`): the root itself when `id` is the master root id (its
+// `data-mroot`) or its live `data-id`, else a descendant. Grace timers move
+// from `window.__ovGrace` to a per-instance `ovGrace` ref for the same reason.
+// Pages keep the document-scoped form byte-for-byte.
+export function isMasterCode(code: string): boolean {
+  return code.includes('{...rest}');
+}
+
+/** JS expression that resolves the element for `idExpr` (a JS expression). */
+function findJs(idExpr: string, scoped: boolean): string {
+  return scoped
+    ? `ovFind(${idExpr})`
+    : `document.querySelector('[data-id="' + ${idExpr} + '"]')`;
+}
+/** Same for a LITERAL id — the page form keeps the historical single string. */
+function findLitJs(id: string, scoped: boolean): string {
+  return scoped ? `ovFind('${id}')` : `document.querySelector('[data-id="${id}"]')`;
+}
+
+const MASTER_SCOPE_DECL = `  const ovRootRef = useRef(null);
+  const ovGrace = useRef({});
+  const ovFind = (id) => { const r = ovRootRef.current; if (!r) return document.querySelector('[data-id="' + id + '"]'); if (r.getAttribute('data-mroot') === id || r.getAttribute('data-id') === id) return r; return r.querySelector('[data-id="' + id + '"]'); };
+`;
+
+/** Ensure a master carries the instance-scoped overlay runtime plumbing:
+ *  `useRef` import, the `ovRootRef` / `ovGrace` / `ovFind` declarations (once,
+ *  at the state insert position) and `ref={ovRootRef}` on the root — placed
+ *  BEFORE `{...rest}` (the runtime never forwards a `ref` prop into a master,
+ *  so nothing overrides it). Idempotent. */
+export function ensureMasterOverlayScope(code: string): string {
+  if (!isMasterCode(code)) return code;
+  let result = code;
+  if (!result.includes('const ovRootRef')) {
+    const statePos = findStateInsertPos(result);
+    if (statePos < 0) return code;
+    result = result.slice(0, statePos) + MASTER_SCOPE_DECL + result.slice(statePos);
+    result = ensureNamedImport(result, 'react', ['useRef']);
+  }
+  if (!/ref=\{ovRootRef\}/.test(result)) {
+    // Before `{...rest}` wherever it sits in the root tag (not only when it
+    // directly follows `data-id`).
+    result = insertAtRootRestSpread(result, 'ref={ovRootRef}', true);
+  }
+  return result;
 }
 
 /** Strip overlay click/hover handlers (onClick / onMouseEnter / onMouseLeave)
@@ -421,14 +479,14 @@ function stripOverlayHandlers(text: string, setter: string): string {
 /** The mirror hover handler that lives ON the overlay element: close when the
  *  cursor leaves the overlay, UNLESS it moved back onto the trigger. Empty for
  *  non-hover triggers. */
-function buildOverlayHoverMirrorAttr(triggerConfig: OverlayTriggerConfig, overlayId: string, triggerId: string): string {
+function buildOverlayHoverMirrorAttr(triggerConfig: OverlayTriggerConfig, overlayId: string, triggerId: string, scoped = false): string {
   if (triggerConfig.trigger !== 'hover') return '';
   const varName = stateVarName(overlayId);
   const setVarName = `set${varName.charAt(0).toUpperCase() + varName.slice(1)}`;
   // Same grace-period close as the trigger side (see buildOverlayHandlerAttr)
   // — entering the overlay cancels the trigger's pending close, and leaving
   // it back across the gap toward the trigger must not insta-close either.
-  return ` onMouseEnter={() => { ${graceCancelJs(overlayId)} ${setVarName}(true); }} onMouseLeave={(e) => { const tr = document.querySelector('[data-id="${triggerId}"]'); if (tr && e.relatedTarget && tr.contains(e.relatedTarget)) return; ${graceArmJs(overlayId, setVarName)} }}`;
+  return ` onMouseEnter={() => { ${graceCancelJs(overlayId, scoped)} ${setVarName}(true); }} onMouseLeave={(e) => { const tr = ${findLitJs(triggerId, scoped)}; if (tr && e.relatedTarget && tr.contains(e.relatedTarget)) return; ${graceArmJs(overlayId, setVarName, scoped)} }}`;
 }
 
 /** The useEffect that powers a FIXED overlay (modal) at runtime. Reads its
@@ -438,14 +496,14 @@ function buildOverlayHoverMirrorAttr(triggerConfig: OverlayTriggerConfig, overla
  *  `pageScroll === 'auto'`. Backdrop = a press whose target is the overlay
  *  element itself (not its content). fill/zIndex live in the element style
  *  (config-baked at create; the editor Renderer also applies them live). */
-export function buildFixedOverlayRuntimeEffect(overlayId: string): string {
+export function buildFixedOverlayRuntimeEffect(overlayId: string, scoped = false): string {
   const varName = stateVarName(overlayId);
   const setVarName = `set${varName.charAt(0).toUpperCase() + varName.slice(1)}`;
   const esc = escapeRegExp(overlayId);
   void esc;
   return `  useEffect(() => {
     if (!${varName}) return;
-    const overlay = document.querySelector('[data-id="${overlayId}"]');
+    const overlay = ${findLitJs(overlayId, scoped)};
     if (!overlay) return;
     const cfg = JSON.parse(overlay.getAttribute('data-overlay') || '{}');
     if (cfg.fill) overlay.style.backgroundColor = cfg.fill;
@@ -475,13 +533,13 @@ export function buildFixedOverlayRuntimeEffect(overlayId: string): string {
  * What it does: pressing anywhere on the page closes the overlay, not only the
  * source. Trigger presses are ignored (the trigger's own handler toggles);
  * presses inside the overlay keep it open. */
-export function buildRelativeOverlayPosEffect(overlayId: string): string {
+export function buildRelativeOverlayPosEffect(overlayId: string, scoped = false): string {
   const varName = stateVarName(overlayId);
   const setter = `set${varName.charAt(0).toUpperCase() + varName.slice(1)}`;
   return `  useLayoutEffect(() => {
     if (!${varName}) return;
     const position = () => {
-      const overlay = document.querySelector('[data-id="${overlayId}"]');
+      const overlay = ${findLitJs(overlayId, scoped)};
       if (!overlay) return;
       const raw = JSON.parse(overlay.getAttribute('data-overlay') || '{}');
       let cfg = raw;
@@ -493,7 +551,7 @@ export function buildRelativeOverlayPosEffect(overlayId: string): string {
           : Object.keys(raw.responsive).map(Number).filter(n => ww <= n).sort((a, b) => a - b)[0];
         if (owning !== undefined && raw.responsive[owning]) cfg = { ...raw, ...raw.responsive[owning] };
       }
-      const trigger = document.querySelector('[data-id="' + cfg.triggerId + '"]');
+      const trigger = ${findJs('cfg.triggerId', scoped)};
       if (!trigger) return;
       const r = trigger.getBoundingClientRect();
       const w = overlay.offsetWidth, h = overlay.offsetHeight;
@@ -520,10 +578,10 @@ export function buildRelativeOverlayPosEffect(overlayId: string): string {
       overlay.style.left = left + 'px';
     };
     const onOutside = (e) => {
-      const ov = document.querySelector('[data-id="${overlayId}"]');
+      const ov = ${findLitJs(overlayId, scoped)};
       if (ov && ov.contains(e.target)) return;
       const tid = ov ? (JSON.parse(ov.getAttribute('data-overlay') || '{}').triggerId) : null;
-      const tr = tid ? document.querySelector('[data-id="' + tid + '"]') : null;
+      const tr = tid ? ${findJs('tid', scoped)} : null;
       if (tr && tr.contains(e.target)) return;
       ${setter}(false);
     };
@@ -684,7 +742,8 @@ export function createOverlayInCode(
   // --- Step 2: Build all pieces ---
 
   const triggerAttr = ` data-overlay-trigger='${JSON.stringify(triggerConfig)}'`;
-  const handlerAttr = buildOverlayHandlerAttr(triggerConfig, overlayId);
+  const scoped = isMasterCode(code);
+  const handlerAttr = buildOverlayHandlerAttr(triggerConfig, overlayId, scoped);
 
   const posStyles = buildPositionStyles(overlayConfig);
   const indent = '      ';
@@ -718,7 +777,7 @@ export function createOverlayInCode(
   const enterT = formatTransitionJSX(overlayConfig.enterTransition ?? DEFAULT_ENTER_TRANSITION);
   const exitT = formatTransitionJSX(overlayConfig.exitTransition ?? DEFAULT_EXIT_TRANSITION);
   // Hover bridge mirror handler ON the overlay (empty for click triggers).
-  const hoverMirror = buildOverlayHoverMirrorAttr(triggerConfig, overlayId, triggerId);
+  const hoverMirror = buildOverlayHoverMirrorAttr(triggerConfig, overlayId, triggerId, scoped);
   // Fixed = opacity fade with per-direction transition; relative = opacity + slide.
   const appearAttrs = overlayConfig.type === 'fixed'
     ? `initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: ${exitT} }} transition={${enterT}}`
@@ -788,12 +847,14 @@ export function createOverlayInCode(
     const effect = effectAlreadyPresent
       ? ''
       : (overlayConfig.type === 'fixed'
-        ? buildFixedOverlayRuntimeEffect(overlayId)
-        : buildRelativeOverlayPosEffect(overlayId));
+        ? buildFixedOverlayRuntimeEffect(overlayId, scoped)
+        : buildRelativeOverlayPosEffect(overlayId, scoped));
     if (decl || effect) {
       result = result.slice(0, statePos) + decl + effect + result.slice(statePos);
     }
   }
+  // Master: instance-scoped lookups need the root ref + finder (idempotent).
+  if (scoped) result = ensureMasterOverlayScope(result);
 
   trace.action('overlay-gen:create:done', { triggerId, overlayId, type: overlayConfig.type });
   return result;
@@ -1478,7 +1539,7 @@ export function updateOverlayTriggerInCode(
   const hasRuntime = new RegExp(`const\\s*\\[${esc},`).test(code);
   tag = stripOverlayHandlers(tag, setter);
   if (hasRuntime) {
-    tag = appendAttrsToOpeningTag(tag, buildOverlayHandlerAttr(config, overlayId));
+    tag = appendAttrsToOpeningTag(tag, buildOverlayHandlerAttr(config, overlayId, isMasterCode(code)));
   }
 
   let result = code.slice(0, tagStart) + tag + code.slice(tagClose);
@@ -1736,7 +1797,7 @@ export function transferDescendantOverlaysToMasterInCode(
           const tagText = cc.slice(tagStart, tagClose);
           if (!tagText.includes(setVarName)) {
             const attrs = (/data-overlay-trigger=/.test(tagText) ? '' : ` data-overlay-trigger='${JSON.stringify(t.config)}'`)
-              + buildOverlayHandlerAttr(t.config, overlayId);
+              + buildOverlayHandlerAttr(t.config, overlayId, true);
             const attrPos = attrInsertPosBeforeClose(cc, tagClose);
             cc = cc.slice(0, attrPos) + attrs + cc.slice(attrPos);
           }
@@ -1747,11 +1808,12 @@ export function transferDescendantOverlaysToMasterInCode(
         if (statePos >= 0) {
           const stateDecl = `  const [${varName}, ${setVarName}] = useState(false);\n`;
           const effect = ov.config.type === 'fixed'
-            ? buildFixedOverlayRuntimeEffect(overlayId)
-            : buildRelativeOverlayPosEffect(overlayId);
+            ? buildFixedOverlayRuntimeEffect(overlayId, true)
+            : buildRelativeOverlayPosEffect(overlayId, true);
           cc = cc.slice(0, statePos) + stateDecl + effect + cc.slice(statePos);
         }
       }
+      cc = ensureMasterOverlayScope(cc);
     }
 
     // PAGE: strip the orphaned runtime overlay (state + effect + conditional). A static
@@ -1787,10 +1849,12 @@ export function healMissingOverlayEffectsInCode(code: string): string {
     const m = stateRe.exec(result);
     if (!m) continue;
     const pos = m.index + m[0].length;
+    const healScoped = isMasterCode(result);
     const effect = ov.config.type === 'fixed'
-      ? buildFixedOverlayRuntimeEffect(ov.overlayId)
-      : buildRelativeOverlayPosEffect(ov.overlayId);
+      ? buildFixedOverlayRuntimeEffect(ov.overlayId, healScoped)
+      : buildRelativeOverlayPosEffect(ov.overlayId, healScoped);
     result = result.slice(0, pos) + effect + result.slice(pos);
+    if (healScoped) result = ensureMasterOverlayScope(result);
     trace.action('overlay-gen:heal-missing-effect', { overlayId: ov.overlayId, type: ov.config.type });
   }
   return result;

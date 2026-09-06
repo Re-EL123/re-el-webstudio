@@ -2660,7 +2660,14 @@ ${slotConstsBlockMV}`;
  *  work on the live site. `rest`'s `data-id` (the instance's) overrides the
  *  master's; structural props (variants/initial/animate/style) come after and win. */
 function injectRestSpread(jsx: string): string {
-  return jsx.replace(/(data-id="[^"]*")/, '$1 {...rest}');
+  // `data-mroot` = the master root's OWN id, placed AFTER the spread so an
+  // instance's `data-id` can never override it. On the live site the root's
+  // `data-id` becomes the instance id, so every master rule written against
+  // `[data-id="<rootId>"]` (::after border, :lang, bands) matched only the
+  // ORIGINAL instance (whose id equals the root id) — the duplicate lost its
+  // border (live find 2026-09-06). The runtime clones those rules per
+  // instance from this marker; overlay runtime scopes its lookups to it.
+  return jsx.replace(/data-id="([^"]*)"/, (_m, id: string) => `data-id="${id}" {...rest} data-mroot="${id}"`);
 }
 
 /**

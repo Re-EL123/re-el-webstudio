@@ -14,7 +14,9 @@
 
 import { trace } from '@/shared/debug-trace';
 import { queueMutation } from '@/code/mutation/mutation-queue';
-import { isPrimaryViewport } from '@/canvas/node-ops';
+import { isPrimaryViewport, getContentRoot } from '@/canvas/node-ops';
+import { commitOrderAssignments } from '@/canvas/drag/strategies/order-commit';
+import { queuePendingUpdates } from '@/canvas/arrow-nudge';
 import { getReplicaContext } from '@/canvas/drag/replica-context';
 import { queueReplicaCreationUnhide } from '@/canvas/creators/creator-utils';
 import {
@@ -24,6 +26,7 @@ import {
 import { createNode } from '../core/node-creator';
 import { resolveTargets } from '../core/target-resolver';
 import { reinjectMotionProps } from './motion-reinject';
+import { computePasteOrderAssignments } from './order-renumber';
 import { reinjectResponsiveBands, reinjectBorderOverlays, reinjectPlaceholderStyles } from './border-reinject';
 import type {
   ClipboardNode,
@@ -221,6 +224,27 @@ export function executePaste(
   for (const target of targets) {
     const ids = executeForTarget(rootNodes, ctx.clipboardNodes, target, ctx, config, idMapper);
     createdIds.push(...ids);
+    // SIBLING paste into a flex/grid parent (Cmd+D, paste-after-selected):
+    // the clone copied its source's `order`, so two siblings share a number.
+    // Renumber the parent's flow once, clones right after their sources.
+    // Queued AFTER the addNode mutations so the same flush applies them.
+    // Primary tile only — a replica/variant duplicate's per-tile order lives
+    // in its band/entry and the base numbering there is already unique.
+    if (config.targetMode === 'sibling' && target.parentId && target.isPrimary
+      && (!ctx.interactingVpId || isPrimaryViewport(ctx.interactingVpId))) {
+      const parent = ctx.nodes.get(target.parentId);
+      const pairs = rootNodes.map((root, i) => ({ sourceId: root.id, newId: ids[i] })).filter(p => !!p.newId);
+      const assignments = computePasteOrderAssignments(parent, ctx.nodes, pairs);
+      if (assignments.length) {
+        // `order` is viewport-routed (inline / @container band / variant
+        // ternary) — every write goes through commitOrderAssignments, the one
+        // router (see order-commit.test's routing invariant).
+        const contentEl = getContentRoot();
+        const vpId = ctx.interactingVpId ?? 'desktop';
+        if (contentEl) queuePendingUpdates(commitOrderAssignments(assignments, contentEl, vpId));
+        trace.action('paste:sibling-order-renumber', { parentId: target.parentId, vpId, assignments, routed: !!contentEl });
+      }
+    }
   }
 
   // Post-paste pass — replica visibility cascade. Overlay reattach (rebuilding

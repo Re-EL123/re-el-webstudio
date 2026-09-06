@@ -13,6 +13,7 @@ import type { Transform, NodeMap, DraggedNode, PendingUpdate, Point, SnapGuide, 
 import type { DragContext, DragStrategy } from './types';
 import { MIN_DRAG_DISTANCE } from '@/shared/constants';
 import { trace } from '@/shared/debug-trace';
+import { isComponentFilePath } from '@/code/project/active-file-store';
 import { isViewerMode } from '@/code/stores/viewer-mode-store';
 import { getCanvasBridge } from '@/canvas/canvas-bridge';
 import type { PostMessageBridge } from '@/canvas-sandbox/bridge-host';
@@ -697,7 +698,17 @@ export class DragCoordinator {
         queueMutation({ type: 'updateStyles', nodeId: moveUpdate.nodeId, styles: { display: '' } });
       }
 
-      if (droppedOnCanvas) {
+      // A component master's VARIANT ROOT tile is dragged with the canvas
+      // strategy too, but it never leaves its variant — resetting the
+      // interacting viewport to the primary re-selected the primary tile on
+      // mouse-up ("I dragged the hover variant and the selection jumped to the
+      // primary", 2026-09-06). Only a real page canvas-node drop resets.
+      const isVariantTileDrag = isComponentFilePath(getActiveFilePath())
+        && (this.context?.selectedIds ?? []).some((id) => {
+          const n = getNodeFromCache(id);
+          return !!n && !n.parentId && !n.isCanvasNode && !n.attrs?.['data-overlay'];
+        });
+      if (droppedOnCanvas && !isVariantTileDrag) {
         const store = getDefaultStore();
         const vps = store.get(visibleViewportsAtom);
         const primaryId = (vps.find((v) => v.isPrimary) ?? vps[0])?.id;

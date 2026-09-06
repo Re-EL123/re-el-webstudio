@@ -206,6 +206,13 @@ export default function LayersPanel() {
     for (const [ovId, ovNode] of nodes) {
       const raw = ovNode.attrs?.['data-overlay'];
       if (!raw) continue;
+      // An overlay that lives INSIDE a design component master arrives on the
+      // page as an expanded-instance internal (`componentInstanceId` set, id
+      // prefixed `instance:master`). It belongs to the master, not to the page
+      // tree — surfacing it under the instance made the instance look like it
+      // owned an overlay (live find 2026-09-06). Only an overlay added ON the
+      // instance from the page (a real page node) nests under it.
+      if (ovNode.componentInstanceId) continue;
       let triggerId: string | undefined;
       try { triggerId = JSON.parse(raw).triggerId; } catch { continue; }
       if (!triggerId || !nodes.has(triggerId)) continue;

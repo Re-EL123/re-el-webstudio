@@ -454,11 +454,25 @@ export function isGradientBorder(styles: Record<string, string>): boolean {
  * `data-node-id` (sandbox) selector spellings — the same regex BorderControl
  * uses to detect overlay render mode.
  */
-export function extractBorderAfterRuleBody(css: string, nodeId: string): string | null {
-  trace.fn('extractBorderAfterRuleBody', { nodeId });
+export function extractBorderAfterRuleBody(css: string, nodeId: string, variant?: string | null): string | null {
+  trace.fn('extractBorderAfterRuleBody', { nodeId, variant: variant ?? null });
   if (!css || !nodeId) return null;
   const esc = nodeId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Per-variant rule first (see generator-styles borderOverlaySelector), then
+  // the base rule the variant inherits.
+  if (variant && variant !== 'default') {
+    const own = extractVariantBorderAfterRuleBody(css, nodeId, variant);
+    if (own != null) return own;
+  }
   const m = css.match(new RegExp(`\\[data-(?:node-)?id="${esc}"\\]::after\\s*\\{([^}]*)\\}`, 's'));
+  return m ? m[1] : null;
+}
+
+/** ONLY the variant-scoped rule body (null when the variant inherits the base). */
+export function extractVariantBorderAfterRuleBody(css: string, nodeId: string, variant: string): string | null {
+  if (!css || !nodeId || !variant || variant === 'default') return null;
+  const esc = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = css.match(new RegExp(`\\[data-variant="${esc(variant)}"\\] \\[data-id="${esc(nodeId)}"\\]::after,\\s*\\[data-id="${esc(nodeId)}"\\]\\[data-variant="${esc(variant)}"\\]::after\\s*\\{([^}]*)\\}`, 's'));
   return m ? m[1] : null;
 }
 

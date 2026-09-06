@@ -590,3 +590,39 @@ describe('getResizeCommitProperties — centered axes', () => {
     expect(r.left).toBeUndefined();
   });
 });
+
+// ─── component master root = variant tile (2026-09-06) ──────────────────────
+import { isComponentVariantRootNode, computeSiblingVariantShifts } from './ResizeManager';
+describe('isComponentVariantRootNode', () => {
+  test('top-level non-canvas non-overlay node is the variant root', () => {
+    expect(isComponentVariantRootNode({ parentId: null, isCanvasNode: false, attrs: {} })).toBe(true);
+    expect(isComponentVariantRootNode({ parentId: undefined })).toBe(true);
+  });
+  test('children, canvas nodes and overlays are not', () => {
+    expect(isComponentVariantRootNode({ parentId: 'root' })).toBe(false);
+    expect(isComponentVariantRootNode({ parentId: null, isCanvasNode: true })).toBe(false);
+    expect(isComponentVariantRootNode({ parentId: null, attrs: { 'data-overlay': '{}' } })).toBe(false);
+    expect(isComponentVariantRootNode(null)).toBe(false);
+  });
+});
+
+describe('computeSiblingVariantShifts', () => {
+  const cfgs = [{ name: 'default', x: -384, y: -207 }, { name: 'default-hover', x: 14, y: -90 }, { name: 'pressed', x: 400, y: -90 }];
+  test('west/north growth of the primary moves synced siblings by the same delta', () => {
+    expect(computeSiblingVariantShifts(cfgs, {}, 'default', -100, -40)).toEqual([
+      { variantName: 'default-hover', x: -86, y: -130 },
+      { variantName: 'pressed', x: 300, y: -130 },
+    ]);
+  });
+  test('a sibling with its OWN width keeps x (only y follows); own height keeps y', () => {
+    const mv = { 'default-hover': { width: '50px' }, pressed: { height: '20px' } };
+    expect(computeSiblingVariantShifts(cfgs, mv, 'default', -100, -40)).toEqual([
+      { variantName: 'default-hover', x: 14, y: -130 },
+      { variantName: 'pressed', x: 300, y: -90 },
+    ]);
+  });
+  test('no delta, or resizing a NON-primary tile, moves nobody', () => {
+    expect(computeSiblingVariantShifts(cfgs, {}, 'default', 0, 0)).toEqual([]);
+    expect(computeSiblingVariantShifts(cfgs, {}, 'default-hover', -100, 0)).toEqual([]);
+  });
+});

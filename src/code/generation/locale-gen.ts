@@ -11,6 +11,7 @@
 
 import { toKebab, coerceCssNumberToPx } from '@/shared/css-utils';
 import { trace } from '@/shared/debug-trace';
+import { findVariantRootOpeningTag, stampRootDataVariantAttr } from '@/shared/variant-root';
 import { getSortedBreakpointWidths } from '@/code/stores/viewport-store';
 
 // ─── Style Block Regex ──────────────────────────────────────────────────────
@@ -282,22 +283,9 @@ function stripTopLevelLangRules(css: string): string {
  *  the LIVE `variant` so locale CSS follows runtime variant switches
  *  (generateConnectionCode upgrades the attr when it injects the state). */
 export function ensureRootDataVariantAttr(code: string): string {
-  const expr = code.includes('useState(initialVariant)') ? '{variant}' : '{initialVariant}';
-  const existing = code.match(/data-variant=\{(variant|initialVariant)\}/);
-  if (existing) {
-    const want = expr.slice(1, -1);
-    if (existing[1] === want) return code;
-    return code.replace(/data-variant=\{(?:variant|initialVariant)\}/, `data-variant=${expr}`);
-  }
-  // Root = the first data-id element in the return (the one that spreads
-  // {...rest}/style). Insert right after its data-id attribute.
-  const returnIdx = code.search(/return\s*</);
-  if (returnIdx === -1) return code;
-  const rootAttr = /(<[\w.]+[^>]*?data-id="[^"]+")/.exec(code.slice(returnIdx));
-  if (!rootAttr) return code;
-  const at = returnIdx + rootAttr.index + rootAttr[1].length;
-  trace.action('localeGen.ensureRootDataVariantAttr', { expr });
-  return code.slice(0, at) + ` data-variant=${expr}` + code.slice(at);
+  const out = stampRootDataVariantAttr(code);
+  if (out !== code) trace.action('localeGen.ensureRootDataVariantAttr', { rootId: findVariantRootOpeningTag(out)?.rootId ?? null });
+  return out;
 }
 
 export function updateLocaleStyleInCode(

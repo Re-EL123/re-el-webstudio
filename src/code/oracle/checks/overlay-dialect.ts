@@ -109,9 +109,13 @@ function checkOverlayDialect(code: string, ast: t.File, v: OracleViolation[]): v
       missing.push(`the conditional wrapper: <AnimatePresence>{${varName} && ( …overlay… )}</AnimatePresence>`);
     }
     const isFixed = o.cfg.type === 'fixed';
+    // The effect references its overlay either document-scoped
+    // (`[data-id="<id>"]`, pages) or instance-scoped (`ovFind('<id>')`,
+    // component masters — see overlay-gen ensureMasterOverlayScope).
+    const refsOverlay = code.includes(`[data-id="${o.id}"]`) || code.includes(`ovFind('${o.id}')`);
     const effectPresent = isFixed
-      ? (code.includes(`[data-id="${o.id}"]`) && /useEffect\(/.test(code) && code.includes('prevOverflow'))
-      : (code.includes(`[data-id="${o.id}"]`) && /useLayoutEffect\(/.test(code) && code.includes('getBoundingClientRect'));
+      ? (refsOverlay && /useEffect\(/.test(code) && code.includes('prevOverflow'))
+      : (refsOverlay && /useLayoutEffect\(/.test(code) && code.includes('getBoundingClientRect'));
     if (!effectPresent) {
       const effect = isFixed ? buildFixedOverlayRuntimeEffect(o.id) : buildRelativeOverlayPosEffect(o.id);
       missing.push(`the runtime effect (paste verbatim above the return):\n${effect}`);

@@ -418,9 +418,9 @@ export type Mutation =
   | { type: 'setVariantAttr'; nodeId: string; variant: string; attr: string; value: string; baseValue: string }
   // ─── Border / SVG mutations ─────────────────────────────────────────────
   /** Set a CSS ::after pseudo-element overlay for complex borders (gradient borders, multi-layer). */
-  | { type: 'updateBorderOverlay'; nodeId: string; afterCSS: string }
+  | { type: 'updateBorderOverlay'; nodeId: string; afterCSS: string; variant?: string | null }
   /** Remove the ::after border overlay from an element. */
-  | { type: 'removeBorderOverlay'; nodeId: string }
+  | { type: 'removeBorderOverlay'; nodeId: string; variant?: string | null }
   /** Update arbitrary HTML attributes (aria-label, role, tabindex, etc.) on any element. Empty string removes the attribute. */
   | { type: 'updateHtmlAttrs'; nodeId: string; attrs: Record<string, string> }
   /** Set/clear a CMS navigation binding on an element — writes an expression-valued `href` resolving the current/adjacent detail item, plus the `data-cms-nav` marker. `mode: 'none'` clears it. */
@@ -3191,10 +3191,10 @@ function applyMutationCore(code: string, mutation: Mutation): string {
         return setConditionalStyleInCode(code, mutation.nodeId, mutation.prop, mutation.variantName, mutation.value);
 
       case 'updateBorderOverlay':
-        return updateBorderOverlayStyle(code, mutation.nodeId, mutation.afterCSS);
+        return updateBorderOverlayStyle(code, mutation.nodeId, mutation.afterCSS, mutation.variant);
 
       case 'removeBorderOverlay':
-        return removeBorderOverlayStyle(code, mutation.nodeId);
+        return removeBorderOverlayStyle(code, mutation.nodeId, mutation.variant);
 
       case 'updateHtmlAttrs': {
         let next = updateHtmlAttrsInCode(code, mutation.nodeId, mutation.attrs);

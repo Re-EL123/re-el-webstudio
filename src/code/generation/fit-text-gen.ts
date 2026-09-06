@@ -1,4 +1,6 @@
 import { trace } from '@/shared/debug-trace';
+import { isFitSize } from '@/shared/constants';
+import { splitStyleProps } from '@/shared/css-utils';
 import { findMatchingCloseTagIndex } from './generator-utils';
 import { measureFitRefit, fitHtmlToPlainLines } from '@/shared/fit-measure';
 
@@ -102,10 +104,67 @@ export function calculateFitRefit(
  * The SVG viewBox matches the text's intrinsic dimensions at that size.
  * width:100% on the SVG scales it to fill the parent.
  */
+
+// ─── Layout-participation props: WRAPPER owns them ──────────────────────────
+//
+// The `<svg data-id="X-svg">` wrapper is the element that takes part in the
+// parent's layout — hover/click/layers/size all redirect the inner to it. So
+// everything that positions or lays the node out must live ON the wrapper,
+// not on the inner <p> inside the foreignObject: an `absolute` text switched to
+// FIT kept `position/left/top/transform` on the inner while the wrapper became
+// a plain flow child (`width: 100%` + `order`) — the text dropped behind its
+// siblings and drag treated it as a layout child, yet the Position tool (still
+// reading the inner) said "absolute" (live find 2026-09-06). Framer keeps an
+// absolute text absolute when it goes Fit; so do we: lift on wrap, lower on
+// unwrap, and the panels read/write these keys through the wrapper.
+const FIT_LIFT_KEYS = new Set([
+  'position', 'left', 'top', 'right', 'bottom', 'inset', 'zIndex',
+  'flex', 'flexGrow', 'flexShrink', 'flexBasis', 'order', 'alignSelf', 'justifySelf',
+  'gridColumn', 'gridRow', 'width', 'minWidth', 'maxWidth',
+]);
+/** Fit% scale is fit-OWNED and stays on the inner; any other transform (a
+ *  centering pin's translate) participates in layout → lifts. */
+const isFitOwnedTransform = (raw: string) => /^['"]scale\([\d.]+\)['"]$/.test(raw.trim());
+
+/** Top-level `key: value` pairs of a style-object body (bracket/quote aware). */
+function parseStylePairs(body: string): Array<{ key: string; raw: string }> {
+  const out: Array<{ key: string; raw: string }> = [];
+  for (const part of splitStyleProps(body, ',')) {
+    const m = part.match(/^\s*(['"]?)([A-Za-z_$][\w$-]*)\1\s*:\s*([\s\S]+?)\s*$/);
+    if (m) out.push({ key: m[2], raw: m[3] });
+  }
+  return out;
+}
+const serializePairs = (pairs: Array<{ key: string; raw: string }>) =>
+  pairs.map(({ key, raw }) => `${/^--/.test(key) ? `'${key}'` : key}: ${raw}`).join(', ');
+const isPositioned = (raw: string | undefined) => !!raw && /['"](absolute|fixed)['"]/.test(raw);
+
+/** Split an inner style body into { keep (inner), lift (wrapper) }. */
+function partitionForFitWrap(body: string): { keep: string; lift: Array<{ key: string; raw: string }>; positioned: boolean } {
+  const pairs = parseStylePairs(body);
+  const lift: Array<{ key: string; raw: string }> = [];
+  const keep: Array<{ key: string; raw: string }> = [];
+  for (const pr of pairs) {
+    if (FIT_LIFT_KEYS.has(pr.key) || (pr.key === 'transform' && !isFitOwnedTransform(pr.raw))) lift.push(pr);
+    else keep.push(pr);
+  }
+  const positioned = isPositioned(lift.find(x => x.key === 'position')?.raw);
+  // The inner is a flow child of the foreignObject now; keep an explicit,
+  // harmless position (every node carries one) when we took absolute/fixed.
+  if (positioned) keep.push({ key: 'position', raw: "'relative'" });
+  return { keep: serializePairs(keep), lift, positioned };
+}
+
 export function wrapInFitSVGInCode(
   code: string,
   nodeId: string,
   viewBox: { width: number; height: number; fontSize: number; marginTop?: number },
+  /** `width`: the painted px width to bake when the text's own width is a HUG
+   *  keyword (auto / fit-content / min-content / max-content). A FIT wrapper's
+   *  width can only be Fixed (px) or Relative (%) — like the reference — since
+   *  the fit scales the text INTO the box; a hug box has nothing to scale into
+   *  (the text collapsed to a sliver, live find 2026-09-06). */
+  opts: { width?: string } = {},
 ): string {
   const idPattern = `data-id="${nodeId}"`;
   const idIdx = code.indexOf(idPattern);
@@ -129,8 +188,12 @@ export function wrapInFitSVGInCode(
 
   // Update style block: set fontSize to calculated optimal, add whiteSpace/margin/lineHeight
   const styleMatch = elementCode.match(/style=\{\{([^}]*)\}\}/);
+  let lifted: Array<{ key: string; raw: string }> = [];
   if (styleMatch) {
-    let s = styleMatch[1];
+    // Layout-participation props move to the WRAPPER (see FIT_LIFT_KEYS).
+    const part = partitionForFitWrap(styleMatch[1]);
+    lifted = part.lift;
+    let s = part.keep;
     // Replace existing fontSize with the calculated optimal size
     s = s.replace(/fontSize:\s*['"][^'"]*['"]/, `fontSize: '${viewBox.fontSize}px'`);
     // Remove width/height from inner element — SVG wrapper controls sizing
@@ -162,7 +225,21 @@ export function wrapInFitSVGInCode(
     elementCode = elementCode.replace(styleMatch[0], `style={{${s}}}`);
   }
 
-  const svgWrapper = `<svg data-id="${nodeId}-svg" data-name="FIT" xmlns="http://www.w3.org/2000/svg" style={{width: '100%', height: 'auto', overflow: 'visible', display: 'block', whiteSpace: 'pre'}} viewBox="0 0 ${viewBox.width} ${viewBox.height}">
+  // Wrapper style: the fit contract's own keys + everything lifted from the
+  // inner. A lifted `width` REPLACES the default 100% (an absolute text keeps
+  // its own box); `height` stays 'auto' (derived from the viewBox aspect).
+  const liftedWidth = lifted.find(x => x.key === 'width');
+  const liftedRest = lifted.filter(x => x.key !== 'width');
+  const liftedIsHug = !!liftedWidth && isFitSize(liftedWidth.raw.trim().replace(/^['"]|['"]$/g, ''));
+  const bakedWidth = (opts.width && (liftedIsHug || !liftedWidth)) ? `'${opts.width}'` : null;
+  if (bakedWidth) trace.action('fit-text:bake-hug-width', { nodeId, from: liftedWidth?.raw ?? '(none)', to: opts.width });
+  const wrapperStyle = [
+    `width: ${bakedWidth ?? (liftedWidth && !liftedIsHug ? liftedWidth.raw : "'100%'")}`,
+    "height: 'auto'", "overflow: 'visible'", "display: 'block'", "whiteSpace: 'pre'",
+    ...(liftedRest.length ? [serializePairs(liftedRest)] : []),
+  ].join(', ');
+  if (lifted.length) trace.action('fit-text:lift-to-wrapper', { nodeId, keys: lifted.map(x => x.key) });
+  const svgWrapper = `<svg data-id="${nodeId}-svg" data-name="FIT" xmlns="http://www.w3.org/2000/svg" style={{${wrapperStyle}}} viewBox="0 0 ${viewBox.width} ${viewBox.height}">
   <foreignObject width="100%" height="100%" style={{overflow: 'visible'}}>
     ${elementCode}
   </foreignObject>
@@ -218,6 +295,31 @@ export function unwrapFitSVGInCode(
   // origin; leaving it would render the unwrapped text visibly scaled).
   innerElement = innerElement.replace(/,?\s*transform:\s*'scale\([\d.]+\)'/, '');
   innerElement = innerElement.replace(/,?\s*transformOrigin:\s*'center'/, '');
+
+  // LOWER the wrapper's layout-participation props back onto the inner (the
+  // wrapper is about to disappear). Read the wrapper's CURRENT style — later
+  // writes (order commits, Size tool width) land there, not on the inner.
+  const wrapperOpenEnd = code.indexOf('>', svgIdIdx);
+  const wrapperStyleMatch = code.slice(svgOpenStart, wrapperOpenEnd + 1).match(/style=\{\{([^}]*)\}\}/);
+  if (wrapperStyleMatch) {
+    const FIT_WRAPPER_OWN: Record<string, string> = { height: "'auto'", overflow: "'visible'", display: "'block'", whiteSpace: "'pre'" };
+    const lower = parseStylePairs(wrapperStyleMatch[1]).filter(({ key, raw }) => {
+      if (key in FIT_WRAPPER_OWN && FIT_WRAPPER_OWN[key] === raw.trim()) return false;
+      if (key === 'width' && /^['"]100%['"]$/.test(raw.trim())) return false; // the default we minted
+      return FIT_LIFT_KEYS.has(key) || key === 'transform';
+    });
+    if (lower.length) {
+      const innerStyleMatch = innerElement.match(/style=\{\{([^}]*)\}\}/);
+      const innerPairs = innerStyleMatch ? parseStylePairs(innerStyleMatch[1]) : [];
+      const map = new Map(innerPairs.map(pr => [pr.key, pr] as const));
+      for (const pr of lower) map.set(pr.key, pr);     // wrapper wins (it was the live one)
+      const merged = serializePairs([...map.values()]);
+      innerElement = innerStyleMatch
+        ? innerElement.replace(innerStyleMatch[0], `style={{${merged}}}`)
+        : innerElement.replace(/^<(\w+)/, `<$1 style={{${merged}}}`);
+      trace.action('fit-text:lower-from-wrapper', { nodeId, keys: lower.map(x => x.key) });
+    }
+  }
 
   trace.fn('fit-text:unwrapSVG', { nodeId, restored: true });
   return code.slice(0, svgOpenStart) + innerElement + code.slice(svgEnd);

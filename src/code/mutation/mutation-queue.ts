@@ -608,7 +608,7 @@ export type Mutation =
   | { type: 'deleteFile'; filePath: string }
   // ─── FIT text (SVG foreignObject wrap/unwrap) ──────────────────────────
   /** Wrap a text element in SVG foreignObject for FIT text mode */
-  | { type: 'wrapFitText'; nodeId: string; viewBox: { width: number; height: number; fontSize: number; marginTop?: number } }
+  | { type: 'wrapFitText'; nodeId: string; viewBox: { width: number; height: number; fontSize: number; marginTop?: number }; width?: string }
   /** Unwrap a text element from its SVG foreignObject FIT wrapper */
   | { type: 'unwrapFitText'; nodeId: string }
   // ─── Pseudo rules (::before / ::after / ::placeholder) ────────────────
@@ -3645,7 +3645,7 @@ function applyMutationCore(code: string, mutation: Mutation): string {
 
       // ─── FIT text (SVG foreignObject wrap/unwrap) ───────────────────────────
       case 'wrapFitText':
-        return wrapInFitSVGInCode(code, mutation.nodeId, mutation.viewBox);
+        return wrapInFitSVGInCode(code, mutation.nodeId, mutation.viewBox, { width: mutation.width });
       case 'unwrapFitText':
         return unwrapFitSVGInCode(code, mutation.nodeId);
 

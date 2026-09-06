@@ -1379,6 +1379,43 @@ export function checkFile(
         });
       }
 
+      // ── PAGE ROOT = THE ARTBOARD, NOT A CSS BOX ──
+      // The root element IS the viewport tile: its size comes from the @canvas
+      // viewports entry (width/height in px), and the canvas mounts the page AT
+      // it. A viewport-relative size therefore resolves against the BROWSER
+      // WINDOW, not the artboard — on the canvas the root becomes as tall as
+      // the editor window (not the 900px tile), the Size panel shows a height
+      // that disagrees with the declared viewport, and the live site disagrees
+      // with both. `height: '100vh'` on a page root is the exact shape that hit
+      // this (live find 2026-09-06). The full-height SECTION is the native form:
+      // keep the root px/auto and give an inner <section data-id="…"> the 100vh
+      // — the Size panel has a real vh unit for width/height, so that child
+      // stays editable.
+      // The template LayoutClient is EXEMPT: its root is the outer shell that
+      // legitimately owns viewport sizing and clipping (minHeight: '100vh' is
+      // its normal form), which is the same carve-out the sibling
+      // TEMPLATED_PAGE_ROOT_STYLED rule makes just below.
+      if (kind === 'page' && !isTemplate && nodes.has('root')) {
+        const rootStyles = nodes.get('root')!.styles ?? {};
+        const VP_UNIT = /\d\s*(vh|vw|svh|lvh|dvh|svw|lvw|dvw|vmin|vmax)\b/i;
+        const SIZE_KEYS = ['width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight'];
+        const vpKeys = SIZE_KEYS.filter((k) => typeof rootStyles[k] === 'string' && VP_UNIT.test(rootStyles[k]));
+        const h = rootStyles.height;
+        // height: px | auto only. A PERCENTAGE height on the root is the same
+        // defect by another spelling — it resolves against whatever the canvas
+        // happens to mount the tile into, so it is not the artboard either.
+        const badH = typeof h === 'string' && h.trim() !== '' && h.trim() !== 'auto'
+          && !/^-?\d*\.?\d+px$/.test(h.trim()) && !VP_UNIT.test(h);
+        if (vpKeys.length > 0 || badH) {
+          const shown = [...new Set([...vpKeys, ...(badH ? ['height'] : [])])]
+            .map((k) => `${k}: '${rootStyles[k]}'`).join(', ');
+          v.push({
+            code: 'PAGE_ROOT_VIEWPORT_SIZE', tier: 2, elementId: 'root',
+            message: `The page root (data-id="root") is the ARTBOARD, so its size comes from the @canvas viewports entry — ${shown} does not belong on it. Viewport units (vh/vw/svh/dvh/…) on the root resolve against the BROWSER WINDOW instead of the artboard, so the canvas tile, the Size panel and the live site all disagree about how tall the page is; a percentage height has no artboard to be a percentage OF. The root takes height: '<n>px' or 'auto', and width: '100%' or '<n>px' — nothing else. For a full-viewport hero, keep the root as it was and put the height on a SECTION CHILD: <section data-id="hero" data-name="Hero" style={{ position: 'relative', width: '100%', height: '100vh' }}> … </section>. The Size panel has a real vh unit for a child's width/height, so that section stays editable; the root does not.`,
+          });
+        }
+      }
+
       // A page INSIDE a template route group (path like app/(Group)/…/page.client.tsx)
       // must NOT style its data-id="root": that id COLLIDES with the template's own
       // root in the canvas node map, so padding/background on it is DROPPED on the

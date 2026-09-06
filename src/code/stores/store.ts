@@ -805,6 +805,14 @@ export const canvasInteractingAtom = atom(false);
  *  screen-corner outline can't track a live rotation cleanly and the
  *  stale box lingering behind the shape is visual noise. */
 export const isRotatingAtom = atom(false);
+/** True while a PANEL value scrub is in progress (color-picker drag, slider
+ *  drag, chevron hold). A subset of canvasInteractingAtom — set alongside it
+ *  by ToolSlider / ToolInput / ColorPicker via useScrubInteracting. The
+ *  InteractionOutline hides itself for these: a scrub never moves geometry,
+ *  so the outline adds nothing — and it sits exactly on the edge whose
+ *  border/radius/fill the user is trying to see change (live find
+ *  2026-09-06, border-color picker drag). */
+export const panelScrubAtom = atom(false);
 export const updatingFromCanvasAtom = atom(false);
 
 /** While a single-slot code-component connection is being RE-DRAGGED from

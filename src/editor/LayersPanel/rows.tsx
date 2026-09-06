@@ -836,7 +836,21 @@ export const LayerRow = React.memo(function LayerRow({
           </>
         )}
         {isDragOver && dropPosition === 'inside' && (
-          <div className="absolute inset-0 cut-corners pointer-events-none z-50" style={{ boxShadow: `inset 0 0 0 2px ${selColor}` }} />
+          // Drawn as a CUT SHELL, not an inset box-shadow: the overlay carries the
+          // row's clip-path, which slices a shadow ring straight off along the two
+          // diagonal cuts — the ring showed open notched corners (live find
+          // 2026-09-06). The house pattern for any bordered cut element is a
+          // rect `border` + `.cut-border` (gradient strokes that repaint the
+          // diagonal segments) colored through --cut-border-color. A faint fill
+          // keeps the target obvious at hairline width.
+          <div
+            className="absolute inset-0 cut-corners cut-border pointer-events-none z-50"
+            style={{
+              border: `1px solid ${selColor}`,
+              ['--cut-border-color' as string]: selColor,
+              backgroundColor: `color-mix(in srgb, ${selColor} 14%, transparent)`,
+            } as React.CSSProperties}
+          />
         )}
 
         {/* Expand/Collapse — chevron button when the row has children,

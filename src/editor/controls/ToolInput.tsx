@@ -3,8 +3,7 @@
 // Exact input styling from old builder's ToolInput.tsx.
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { useSetAtom } from 'jotai';
-import { canvasInteractingAtom } from '@/code/stores/store';
+import { useScrubInteracting } from '@/editor/hooks/useScrubInteracting';
 import { trace } from '@/shared/debug-trace';
 import { useIsViewer } from '@/code/stores/viewer-mode-store';
 
@@ -56,7 +55,8 @@ export default function ToolInput({ value, onChange, onChangeLive, onCommit, ste
   const [localValue, setLocalValue] = useState(value);
   const [isFocused, setIsFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const setCanvasInteracting = useSetAtom(canvasInteractingAtom);
+  // Panel value scrub: flips interacting + panelScrub (hides the InteractionOutline).
+  const setCanvasInteracting = useScrubInteracting();
 
   // Chevron drag refs
   const isDraggingRef = useRef(false);

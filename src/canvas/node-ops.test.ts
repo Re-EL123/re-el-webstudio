@@ -2,6 +2,8 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
+  findSvgShapeChild,
+  isFitTextSvgWrapper,
   getViewportPrefix,
   isPrimaryViewport,
   vpIdFromPrefix,
@@ -676,5 +678,43 @@ describe('findVisibleChildRects — children-slot inclusion', () => {
     setStyleContext('app/page.client.tsx', 'desktop', 1440);
     expect(findVisibleChildRects('root', 'desktop').map(c => c.id))
       .toEqual(['KaFiBi-1']);                     // slot OUT on pages
+  });
+});
+
+// ─── isFitTextSvgWrapper — FIT text wrapper vs vector shape ──────────────────
+// `foreignObject` is in SVG_SHAPE_TAGS, so `findSvgShapeChild` matches the FIT
+// wrapper; ResizeManager routed a FIT resize through the geometry-baking shape
+// path (viewBox rewritten to the box, height px, `right` inset dropped → text
+// doubled + overflowed, pins flipped to T/L; live find 2026-09-05).
+describe('isFitTextSvgWrapper', () => {
+  const mk = (partial: Partial<CanvasNode> & { id: string }): CanvasNode => ({
+    type: 'div', children: [], styles: {}, attrs: {}, isCanvasNode: false, ...partial,
+  } as CanvasNode);
+  const nodes = new Map<string, CanvasNode>([
+    ['t1-svg', mk({ id: 't1-svg', type: 'svg', children: ['fo1'], attrs: { 'data-name': 'FIT' } })],
+    ['fo1', mk({ id: 'fo1', type: 'foreignObject', parentId: 't1-svg', children: ['t1'] })],
+    ['t1', mk({ id: 't1', type: 'p', parentId: 'fo1' })],
+    // legacy wrapper without data-name still has the foreignObject child
+    ['t2-svg', mk({ id: 't2-svg', type: 'svg', children: ['fo2'] })],
+    ['fo2', mk({ id: 'fo2', type: 'foreignObject', parentId: 't2-svg' })],
+    // a real shape
+    ['shape-1', mk({ id: 'shape-1', type: 'svg', children: ['shape-1-path'] })],
+    ['shape-1-path', mk({ id: 'shape-1-path', type: 'path', parentId: 'shape-1' })],
+    // an svg that merely ENDS with -svg but holds geometry
+    ['logo-svg', mk({ id: 'logo-svg', type: 'svg', children: ['logo-rect'] })],
+    ['logo-rect', mk({ id: 'logo-rect', type: 'rect', parentId: 'logo-svg' })],
+  ]);
+
+  it('recognises the FIT wrapper by data-name or by its foreignObject child', () => {
+    expect(isFitTextSvgWrapper(nodes.get('t1-svg'), nodes)).toBe(true);
+    expect(isFitTextSvgWrapper(nodes.get('t2-svg'), nodes)).toBe(true);
+  });
+
+  it('never flags a vector shape (findSvgShapeChild still does — that is the trap)', () => {
+    expect(isFitTextSvgWrapper(nodes.get('shape-1'), nodes)).toBe(false);
+    expect(isFitTextSvgWrapper(nodes.get('logo-svg'), nodes)).toBe(false);
+    expect(isFitTextSvgWrapper(nodes.get('t1'), nodes)).toBe(false);
+    expect(isFitTextSvgWrapper(null, nodes)).toBe(false);
+    expect(findSvgShapeChild(nodes.get('t1-svg'), nodes)?.id).toBe('fo1');
   });
 });

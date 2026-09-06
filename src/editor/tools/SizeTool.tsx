@@ -700,12 +700,16 @@ export default function SizeTool({ styles: stylesProp, nodeId: nodeIdProp, vpId,
 
   const widthUnitOptions = useMemo(() => {
     if (pxOnly) return UNIT_OPTIONS.map(o => o.value === 'px' ? o : { ...o, disabled: true });
+    // FIT text: the wrapper's width is the box the text scales INTO, so only a
+    // definite Fixed (px) or Relative (%) makes sense — reference parity
+    // (Fill / Fit Content greyed). auto/vw/vh/fill are disabled.
+    if (isFitSvgWrapper) return UNIT_OPTIONS.map(o => o.value === 'px' || o.value === '%' ? o : { ...o, disabled: true });
     if (isTopLevel) {
       return disableAutoForCode(UNIT_OPTIONS.map(o => o.value === 'px' || o.value === 'auto' ? o : { ...o, disabled: true }));
     }
     if (!widthCanFill) return disableAutoForCode(UNIT_OPTIONS);
     return disableAutoForCode([...UNIT_OPTIONS, { value: 'fill', label: 'fill' }]);
-  }, [widthCanFill, isTopLevel, pxOnly, disableAutoForCode]);
+  }, [widthCanFill, isTopLevel, pxOnly, disableAutoForCode, isFitSvgWrapper]);
 
   const heightUnitOptions = useMemo(() => {
     if (pxOnly) return UNIT_OPTIONS.map(o => o.value === 'px' ? o : { ...o, disabled: true });

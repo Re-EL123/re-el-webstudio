@@ -198,7 +198,7 @@ function ShapeDropdown({ active, sketchActive, onSelect, onSketch }: {
   active: boolean; sketchActive: boolean; onSelect: (shape: string) => void; onSketch: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [currentShape, setCurrentShape] = useState('square');
+  const [currentShape, setCurrentShape] = useState('triangle');
   const ref = useRef<HTMLDivElement>(null);
 
   useClickOutside(ref, open, () => setOpen(false));

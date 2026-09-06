@@ -11,7 +11,7 @@
 
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useAtomValue } from 'jotai';
-import { selectedNodeAtom, canvasInteractingAtom, isRotatingAtom, isComponentSelectedAtom } from '@/code/stores/store';
+import { selectedNodeAtom, canvasInteractingAtom, isRotatingAtom, panelScrubAtom, isComponentSelectedAtom } from '@/code/stores/store';
 import { interactingViewportIdAtom } from '@/code/stores/viewport-store';
 import { getScreenCornersById, cornersEqual, type ScreenCorners } from '@/canvas/resize/geometry-utils';
 import { trace } from '@/shared/debug-trace';
@@ -49,6 +49,7 @@ export default function InteractionOutline() {
   const vpId = useAtomValue(interactingViewportIdAtom);
   const isInteracting = useAtomValue(canvasInteractingAtom);
   const isRotating = useAtomValue(isRotatingAtom);
+  const isPanelScrub = useAtomValue(panelScrubAtom);
   const isComponent = useAtomValue(isComponentSelectedAtom);
   // Canvas overlay → `--selection`, not the amber brand accent. Components
   // keep their violet so instance-vs-node stays readable at a glance.
@@ -81,7 +82,10 @@ export default function InteractionOutline() {
   // rotation pivot isn't the bbox center), so a stale box lingers behind the
   // shape — visual noise the user explicitly asked to drop. Resize/drag keep
   // the outline; only rotate suppresses it.
-  const active = !!(isInteracting && selectedId && !isRotating);
+  // Also hidden for PANEL VALUE SCRUBS (color picker / slider / chevron hold):
+  // nothing moves, and the outline sits exactly on the edge whose border,
+  // radius or fill the user is watching change (live find 2026-09-06).
+  const active = !!(isInteracting && selectedId && !isRotating && !isPanelScrub);
 
   // Synchronously seed the four <line> attributes with the initial corners
   // BEFORE the browser paints. Without this the outline mounts with empty

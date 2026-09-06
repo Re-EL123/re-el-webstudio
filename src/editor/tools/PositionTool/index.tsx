@@ -12,6 +12,7 @@ import { getContentRoot, findNodeSize, findNodeParentInnerSize, findNodeComputed
 import { transformManager } from '@/canvas/transform';
 import { nodeTreeStructureVersionAtom, getNodeFromCache } from '@/code/stores/store';
 import { useNode, useNodesComputed } from '@/code/stores/node-family';
+import { fitSizeRedirectTarget } from '@/editor/tools/size-helpers';
 import { trace } from '@/shared/debug-trace';
 import { captureVisualRect } from '@/canvas/visual-rect';
 import { applyReplicaClearSemantics } from './replica-clears';
@@ -28,7 +29,17 @@ interface Props {
   isTopLevel?: boolean;
 }
 
-export default function PositionTool({ nodeId, styles, vpId, isReplica, vpWidth, isTopLevel }: Props) {
+export default function PositionTool({ nodeId: nodeIdProp, styles: stylesProp, vpId, isReplica, vpWidth, isTopLevel }: Props) {
+  // FIT-TEXT REDIRECT (mirrors SizeTool): the SVG wrapper is the layout
+  // participant — position / pins / transform live ON it (fit-text-gen lifts
+  // them at wrap). Selecting the inner <p> must read and write those keys on
+  // the wrapper, or the panel says "absolute" while the canvas lays out a
+  // flow child (live find 2026-09-06).
+  const fitRedirectId = useNodesComputed((nodes) => fitSizeRedirectTarget(nodes, nodeIdProp), [nodeIdProp]);
+  const isFitInnerRedirect = fitRedirectId != null;
+  const nodeId = fitRedirectId ?? nodeIdProp;
+  const fitWrapperNode = useNode(fitRedirectId);
+  const styles = isFitInnerRedirect ? ((fitWrapperNode?.styles ?? {}) as Record<string, string>) : stylesProp;
   // During a REPARENT drag the node's parentId changes (canvas node → child of
   // a frame → absolute-in-frame), which flips this panel from the "Space" X/Y
   // coords to the L/T/R/B pins. That change lands in the IMPERATIVE node cache
@@ -75,7 +86,8 @@ export default function PositionTool({ nodeId, styles, vpId, isReplica, vpWidth,
   // Any <svg> node (single shape OR group) uses the canonical shape model —
   // px X/Y + Size, no pins (Framer parity; see position-utils). Pins can't be
   // made stable on a vector whose centering is a % of its own size.
-  const isSvgNode = liveNode?.type === 'svg';
+  // A FIT wrapper is an <svg> carrying TEXT — it keeps the full pin model.
+  const isSvgNode = liveNode?.type === 'svg' && !isFitInnerRedirect && !nodeId.endsWith('-svg');
   const showPins = (isAbsoluteInFrame || isFixed) && !isSvgGroup && !isSvgNode;
   const showCoords = (isAbsolute || isFixed) && !showPins;
 

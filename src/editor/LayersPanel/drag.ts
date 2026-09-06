@@ -90,6 +90,24 @@ export function layerAcceptsInsideDrop(
   return !!opts?.isCmsRowTemplate;
 }
 
+/**
+ * Position fix-up for a node REPARENTED through the layers tree. `fixed` is a
+ * page-level concept (anchored to the browser viewport); inside ANY frame it is
+ * meaningless and the canvas drag already converts it on entry
+ * (CanvasDragStrategy treats fixed like absolute; node-ops paints it as
+ * absolute). The layers drop had two position branches — canvas-node source
+ * and no-layout destination — and a plain tree node dropped into a FLEX/GRID
+ * frame hit neither, so it kept `position: 'fixed'` with `flex`/`order`
+ * bolted on (live find 2026-09-06). Returns the style delta or null.
+ * Pins (left/top/right/bottom) are kept: they now anchor to the frame.
+ */
+export function positionFixupForLayersReparent(
+  draggedStyles: Record<string, string> | undefined,
+): Record<string, string> | null {
+  if (draggedStyles?.position === 'fixed') return { position: 'absolute' };
+  return null;
+}
+
 export function resolveLayerDropStructure(
   nodes: Map<string, CanvasNode>,
   indicator: { nodeId: string; position: 'before' | 'after' | 'inside' },
@@ -450,7 +468,19 @@ export function startLayerDrag(ctx: LayerDragContext, e: ReactMouseEvent, layerI
       // shrink:1 and collapses to ~0 (the "disappears on drop into a flex
       // layout" bug). Applies to BOTH canvas nodes and tree rows dragged into a
       // flex child (drop `inside` OR before/after a flex sibling).
-      const enterFlex = flexForFlowChildEnteringFlex(draggedNode.styles, parentLayout);
+      // `fixed` never survives a reparent into a frame — see the helper. Only
+      // when no earlier branch already decided the position (canvas-source
+      // flow entry / no-layout absolute both take precedence).
+      const fixedFix = positionFixupForLayersReparent(draggedNode.styles);
+      if (fixedFix && !('position' in moveStyles)) {
+        Object.assign(moveStyles, fixedFix);
+        trace.action('layers:drop-fixed-to-absolute', { draggedId, finalParentId, dropVpId, parentLayout });
+      }
+      // Out-of-flow children (absolute/fixed) don't take part in flex layout —
+      // don't stamp inert `flex` on them.
+      const effectivePosition = moveStyles.position !== undefined ? moveStyles.position : (draggedNode.styles?.position ?? '');
+      const outOfFlow = effectivePosition === 'absolute' || effectivePosition === 'fixed';
+      const enterFlex = outOfFlow ? null : flexForFlowChildEnteringFlex(draggedNode.styles, parentLayout);
       if (enterFlex) moveStyles.flex = enterFlex;
       // A canvas node (present in NO viewport) entering a NON-PRIMARY page
       // replica should appear ONLY there — same as the canvas drag. Hide it on

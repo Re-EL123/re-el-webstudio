@@ -223,3 +223,85 @@ describe('calculateFitRefit — contract', () => {
     expect(r!.fontSize).toBeGreaterThan(0);
   });
 });
+
+describe('FIT lifts layout-participation props to the wrapper (2026-09-06)', () => {
+  const ABS = `export default function Page() {
+  return <div data-id="hero" style={{position: 'relative', display: 'flex'}}>
+    <p data-id="title" style={{fontSize: '145px', color: '#fff', position: 'absolute', zIndex: '3', order: '1', left: "50%", top: '50%', transform: 'translateX(-50%) translateY(-50%)', width: '640px'}}>NIKITA</p>
+  </div>;
+}`;
+  const wrapperOf = (code: string) => code.match(/<svg data-id="title-svg"[^>]*style=\{\{([^}]*)\}\}/)![1];
+  const innerOf = (code: string) => code.match(/<p data-id="title"[^>]*style=\{\{([^}]*)\}\}/)![1];
+
+  it('an ABSOLUTE text stays absolute: position/pins/transform/z/order move to the wrapper, width replaces 100%', () => {
+    const out = wrapInFitSVGInCode(ABS, 'title', { width: 1010, height: 178, fontSize: 145, marginTop: 24 });
+    const w = wrapperOf(out), i = innerOf(out);
+    expect(w).toContain("position: 'absolute'");
+    expect(w).toContain('left: "50%"');
+    expect(w).toContain("top: '50%'");
+    expect(w).toContain("transform: 'translateX(-50%) translateY(-50%)'");
+    expect(w).toContain("zIndex: '3'");
+    expect(w).toContain("order: '1'");
+    expect(w).toContain("width: '640px'");
+    expect(w).not.toContain("width: '100%'");
+    expect(w).toContain("height: 'auto'");
+    // inner: flow child of the foreignObject, no layout props left
+    expect(i).toContain("position: 'relative'");
+    expect(i).not.toMatch(/left:|top:|zIndex:|order:|transform:|width:/);
+    expect(i).toContain("fontSize: '145px'");
+  });
+
+  it('a fit-owned scale transform stays on the inner', () => {
+    const code = ABS.replace("transform: 'translateX(-50%) translateY(-50%)', ", "transform: 'scale(0.8)', transformOrigin: 'center', ");
+    const out = wrapInFitSVGInCode(code, 'title', { width: 1010, height: 178, fontSize: 145 });
+    expect(innerOf(out)).toContain("transform: 'scale(0.8)'");
+    expect(wrapperOf(out)).not.toContain('scale(');
+  });
+
+  it('unwrap LOWERS the wrapper\'s live props back (incl. a width the Size tool changed) and drops wrapper-only keys', () => {
+    let out = wrapInFitSVGInCode(ABS, 'title', { width: 1010, height: 178, fontSize: 145 });
+    out = out.replace("width: '640px'", "width: '720px'");            // Size tool edit on the wrapper
+    const back = unwrapFitSVGInCode(out, 'title');
+    expect(back).not.toContain('title-svg');
+    const i = back.match(/<p data-id="title"[^>]*style=\{\{([^}]*)\}\}/)![1];
+    expect(i).toContain("position: 'absolute'");
+    expect(i).toContain('left: "50%"');
+    expect(i).toContain("transform: 'translateX(-50%) translateY(-50%)'");
+    expect(i).toContain("zIndex: '3'");
+    expect(i).toContain("width: '720px'");
+    expect(i).not.toMatch(/height: 'auto'|overflow:|display: 'block'|whiteSpace: 'pre'/);
+  });
+
+  it('a plain flow text keeps the historical wrapper (width 100%, nothing lifted)', () => {
+    const CODE = `export default function Page() {
+  return <div data-id="root"><p data-id="t" style={{fontSize: '48px', position: 'relative'}}>x</p></div>;
+}`;
+    const out = wrapInFitSVGInCode(CODE, 't', { width: 520, height: 60, fontSize: 48 });
+    expect(out.match(/<svg data-id="t-svg"[^>]*style=\{\{([^}]*)\}\}/)![1]).toContain("width: '100%'");
+    expect(out.match(/<svg data-id="t-svg"[^>]*style=\{\{([^}]*)\}\}/)![1]).toContain("position: 'relative'");
+  });
+});
+
+describe('wrapInFitSVGInCode — hug width bakes to px', () => {
+  const vb = { width: 520, height: 60, fontSize: 48 };
+  it('replaces a lifted `auto` width with the painted px (Fixed) — a FIT box is never hug', () => {
+    const code = `<p data-id="title" style={{width: 'auto', fontSize: '48px'}}>Hi</p>`;
+    const out = wrapInFitSVGInCode(code, 'title', vb, { width: '235px' });
+    const w = out.slice(out.indexOf('<svg'), out.indexOf('<foreignObject'));
+    expect(w).toContain("width: '235px'");
+    expect(w).not.toContain("width: 'auto'");
+    expect(out).not.toMatch(/<p[^>]*width/);
+  });
+  it('keeps an explicit px / % width even when a measurement is offered', () => {
+    const code = `<p data-id="title" style={{width: '50%', fontSize: '48px'}}>Hi</p>`;
+    const out = wrapInFitSVGInCode(code, 'title', vb, { width: '235px' });
+    expect(out.slice(out.indexOf('<svg'), out.indexOf('<foreignObject'))).toContain("width: '50%'");
+  });
+  it('without a measurement a hug width falls back to the 100% default (never writes auto)', () => {
+    const code = `<p data-id="title" style={{width: 'fit-content', fontSize: '48px'}}>Hi</p>`;
+    const out = wrapInFitSVGInCode(code, 'title', vb);
+    const w = out.slice(out.indexOf('<svg'), out.indexOf('<foreignObject'));
+    expect(w).toContain("width: '100%'");
+    expect(w).not.toContain('fit-content');
+  });
+});

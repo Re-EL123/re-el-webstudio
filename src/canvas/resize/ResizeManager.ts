@@ -11,7 +11,7 @@ import { syncQueueCode, queueMutation, flushNow } from '@/code/mutation/mutation
 import { bakeStylesForTile, tileContextFor } from '@/canvas/replica-bake';
 import { getViewportWidths } from '@/code/stores/viewport-store';
 import { dragStateOps } from '@/canvas/drag/drag-state-store';
-import { getActiveFilePath, findNodeRect, findNodeComputedStyles, patchNodeStyles, getViewportPrefix, updateNodeStyles, findSvgShapeChild, getSvgGroupAncestorChain, isPrimaryViewport, forceCanvasRender } from '@/canvas/node-ops';
+import { getActiveFilePath, findNodeRect, findNodeComputedStyles, patchNodeStyles, getViewportPrefix, updateNodeStyles, findSvgShapeChild, getSvgGroupAncestorChain, isPrimaryViewport, forceCanvasRender, isFitTextSvgWrapper } from '@/canvas/node-ops';
 import { viewportBandPinOps } from './viewport-band-pin-store';
 import { normalizeGroupOnResize, refitGroupChain } from '@/code/svg/refit-group';
 import {
@@ -385,6 +385,22 @@ interface ResizeCallbacks {
  * '100vh' → 'vh', '50%' → '%', '320px' → 'px', 'auto'/'min-content' → 'px'
  * (no numeric value ⇒ treated as px so the resize commits a px size).
  */
+/**
+ * The px number a VIEWPORT-ROOT resize commits for one axis. `committed` is
+ * the unit-preserving style string the generic path built (`'1215px'`, but
+ * also `'135vh'` when the root's source height is `100vh`, or `'87%'`);
+ * `livePx` is the measured px the gesture tracked. Only a px string is
+ * trusted verbatim — any other unit falls back to the live px. The old
+ * height line did `parseInt(finalStyles.height)`: `'135vh'` → 135, written
+ * as a 135 px breakpoint height + `height: '135px'` on the root — the first
+ * drag on a `100vh` page "reverted" to ~150px and only a second (now px)
+ * drag stuck (live find 2026-09-06). Width already had this guard.
+ */
+export function viewportCommitPx(committed: string | undefined, livePx: number): number {
+  const px = committed && /^-?[\d.]+px$/.test(committed.trim()) ? parseFloat(committed) : 0;
+  return (Number.isFinite(px) && px > 0 ? Math.round(px) : 0) || Math.round(livePx);
+}
+
 export function parseDimUnit(value: string | undefined): string {
   const m = value?.trim().match(/^-?[\d.]+\s*([a-z%]+)\s*$/i);
   return m ? m[1].toLowerCase() : 'px';
@@ -1294,7 +1310,10 @@ export function startResize(
   // opposite corner was anchored. Normalise BEFORE the gesture reads its start
   // styles: DOM first (invisible — same painted box, rotation kept), then the
   // source write, flushed, so the whole gesture runs on the canonical model.
-  if (nodeData?.type === 'svg' && getNodeFromCache(nodeData.parentId ?? '')?.type !== 'svg') {
+  // A FIT-text wrapper is an `<svg>` too but a LAYOUT box (pins/insets/% top are
+  // its position model, like any text) — never a shape; skip the shape model.
+  const isFitWrapper = isFitTextSvgWrapper(nodeData, getDefaultStore().get(nodesAtom));
+  if (nodeData?.type === 'svg' && !isFitWrapper && getNodeFromCache(nodeData.parentId ?? '')?.type !== 'svg') {
     const rect = captureVisualRect(nodeId, vpId);
     const mv = (nodeData.motionVariants ?? {}) as Record<string, Record<string, unknown>>;
     // TILE-EFFECTIVE map: a stale `x`/`%` can live in an entry, not the base.
@@ -1502,7 +1521,9 @@ export function startResize(
   // resizes through here too means the wrapper always exits resize
   // with a `viewBox="0 0 W H"` matching width/height, so any later
   // rotation operates on a uniform base and looks rigid.
-  const svgShapeChild = nodeData?.type === 'svg'
+  // (FIT wrapper: its `foreignObject` child is in SVG_SHAPE_TAGS but it is text
+  // layout, not geometry — the standard inset/width resize below is the contract.)
+  const svgShapeChild = nodeData?.type === 'svg' && !isFitWrapper
     ? findSvgShapeChild(nodeData, getDefaultStore().get(nodesAtom))
     : null;
   const svgRotate = svgShapeChild ? parseSvgRotate(svgShapeChild.node.attrs?.transform) : null;
@@ -2715,12 +2736,13 @@ export function startResize(
       // the page root's base width is '100%' and parseInt('100%') is 100 —
       // a % that leaks this far must fall back to the measured width, not
       // become a 100px breakpoint.
-      const newWidth = (finalStyles.width?.endsWith('px') ? parseInt(finalStyles.width) : 0) || curWidth;
+      const newWidth = viewportCommitPx(finalStyles.width, curWidth);
       // Height: only forward when the handle actually resizes Y. The
       // callback's contract is that height === 0 means "leave alone";
       // sending the live curHeight on a width-only drag would clobber the
-      // user's auto/px choice.
-      const newHeight = handleAffectsY ? (parseInt(finalStyles.height) || curHeight) : 0;
+      // user's auto/px choice. px-guarded like width: a `100vh` root commits
+      // its height as `'<n>vh'`, which must NOT be read as pixels.
+      const newHeight = handleAffectsY ? viewportCommitPx(finalStyles.height, curHeight) : 0;
       // Final tile x — a west-edge (or zero-crossing-flipped) drag moved the
       // tile's `left` live; persist it into @canvas positions or the commit
       // re-render snaps the tile back to its old x. East drags pass the

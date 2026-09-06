@@ -4,7 +4,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
-import { canvasInteractingAtom } from '@/code/stores/store';
+import { useScrubInteracting } from '@/editor/hooks/useScrubInteracting';
 import { colorPickerOpenAtom } from '@/code/stores/editor-store';
 import { trace } from '@/shared/debug-trace';
 import {
@@ -151,7 +151,8 @@ function usePointerDrag(
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function ColorPicker({ value, onChange, onChangeEnd, showAlpha = true, onCreatePreset, colorPresets, onApplyPreset, onEditPreset, activePresetName }: ColorPickerProps) {
-  const setCanvasInteracting = useSetAtom(canvasInteractingAtom);
+  // Panel value scrub: flips interacting + panelScrub (hides the InteractionOutline).
+  const setCanvasInteracting = useScrubInteracting();
   const setColorPickerOpen = useSetAtom(colorPickerOpenAtom);
 
   // While this picker is mounted, flag color-editing so SelectionOverlay hides

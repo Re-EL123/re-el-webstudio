@@ -16,6 +16,7 @@ import { isReplicaViewportAtom, interactingViewportWidthAtom } from '@/code/stor
 import { containerOverridesAtom, getOverrideValue, hasOverrideAtWidth } from '@/code/stores/container-query-store';
 import { findNodeComputedStyle, getInteractingViewport, forceCanvasRender, updateNodeStyles, getContentRoot } from '@/canvas/node-ops';
 import { trace } from '@/shared/debug-trace';
+import { isFitSize } from '@/shared/constants';
 
 /** Convert a font-size value to its visually-equivalent value in another
  *  unit. Without this, swapping the unit dropdown from `px` to `vw` keeps
@@ -366,8 +367,18 @@ export function TextPropertyControl({ property, label, value: externalValue, onC
         const textContent = node?.textContent || '';
         const styles = node?.styles || {};
         const viewBox = calculateFitViewBox(textContent, styles);
+        // A hug width (auto / fit-content …) cannot host a FIT: the wrapper's
+        // width must be Fixed or Relative (reference parity). Bake the painted
+        // px width so the switch is visually a no-op and the Size tool shows px.
+        let bakedWidth: string | undefined;
+        if (isFitSize(styles.width)) {
+          const { vpId: fitVpId } = getInteractingViewport();
+          const px = parseFloat(findNodeComputedStyle(selectedId, fitVpId, 'width')) || 0;
+          if (px > 0) bakedWidth = `${Math.round(px)}px`;
+          trace.action('font-size:fit-bake-hug-width', { nodeId: selectedId, from: styles.width, px });
+        }
         flushNow();
-        queueMutation({ type: 'wrapFitText', nodeId: selectedId, viewBox });
+        queueMutation({ type: 'wrapFitText', nodeId: selectedId, viewBox, width: bakedWidth });
         const svgId = `${selectedId}-svg`;
         setTimeout(() => setSelectedIds([svgId]), 150);
         trace.action('font-size:switch-to-fit', { nodeId: selectedId, viewBox });

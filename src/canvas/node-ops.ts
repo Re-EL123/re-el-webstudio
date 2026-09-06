@@ -1165,6 +1165,23 @@ export function getIsolatedChildOfGroup(
  * Shared by RotateManager, RotateControl and SvgShapeTool so the "which
  * element holds the geometry" lookup lives in exactly one place.
  */
+/** Is this `<svg>` the FIT-text wrapper (`<svg data-id="X-svg"> > foreignObject >
+ *  text`) rather than a vector shape? `foreignObject` sits in SVG_SHAPE_TAGS (it
+ *  is a legitimate svg child elsewhere), so `findSvgShapeChild` matches the
+ *  wrapper — routing a FIT resize through the geometry-baking shape path, which
+ *  rewrote the fit viewBox to the box, pinned `height` to px, converted the %
+ *  top to px and dropped the `right` inset (live find 2026-09-05). FIT wrappers
+ *  are LAYOUT boxes: width/insets only, `height: auto`, viewBox owned by fit-measure. */
+export function isFitTextSvgWrapper(
+  node: import('@/code/parsing/parser').CanvasNode | null | undefined,
+  nodes: Map<string, import('@/code/parsing/parser').CanvasNode>,
+): boolean {
+  if (!node || node.type !== 'svg') return false;
+  if (node.attrs?.['data-name'] === 'FIT') return true;
+  if (!node.id?.endsWith('-svg') || !Array.isArray(node.children)) return false;
+  return node.children.some((cid) => (nodes.get(cid)?.type || '').replace('motion.', '') === 'foreignObject');
+}
+
 export function findSvgShapeChild(
   node: import('@/code/parsing/parser').CanvasNode | null | undefined,
   nodes: Map<string, import('@/code/parsing/parser').CanvasNode>,

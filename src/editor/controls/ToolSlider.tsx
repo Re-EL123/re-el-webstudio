@@ -6,8 +6,7 @@
 
 import * as React from 'react';
 import * as SliderPrimitive from '@radix-ui/react-slider';
-import { useSetAtom } from 'jotai';
-import { canvasInteractingAtom } from '@/code/stores/store';
+import { useScrubInteracting } from '@/editor/hooks/useScrubInteracting';
 import { trace } from '@/shared/debug-trace';
 
 interface Props {
@@ -42,7 +41,8 @@ export default function ToolSlider({ value, min = 0, max = 100, step = 1, onChan
   // re-layout-thrash with the canvas on every tick: a gap slider
   // moves children every frame, the selection border RAF-polls the
   // selected node's rect, and you get a visible jiggle.
-  const setCanvasInteracting = useSetAtom(canvasInteractingAtom);
+  // Panel value scrub: flips interacting + panelScrub (hides the InteractionOutline).
+  const setCanvasInteracting = useScrubInteracting();
   const isInteractingRef = React.useRef(false);
 
   const handleValueChange = React.useCallback((values: number[]) => {

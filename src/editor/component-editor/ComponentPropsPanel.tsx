@@ -6,6 +6,8 @@ import type { ComponentControlDef } from '@/code/components/controls-parser';
 import { ToolRow, ToolInput, ToolSlider, ToolSelect, ToolSegmentedControl } from '../controls';
 import ColorInput from '../controls/ColorInput';
 import UploadControl from '../controls/UploadControl';
+import GroupControl from '../tools/GroupControl';
+import TransitionControl from '../tools/TransitionControl';
 import { trace } from '@/shared/debug-trace';
 
 const YES_NO_OPTIONS = [
@@ -24,6 +26,129 @@ export default function ComponentPropsPanel({ controls, values, onChange }: Comp
 
   trace.fn('ComponentPropsPanel.render', { controlCount: entries.length });
 
+  // Recursive — a `group` control renders its nested controls through this
+  // same function inside the group popup (mirrors ComponentPropsTool). The
+  // editor sidebar used to know only the flat types, so a @shaderDoc
+  // component's grouped settings (Liquid metal · 10 settings …) rendered as
+  // nothing while the Properties panel showed them (user report 2026-09-06).
+  const renderControl = (propName: string, controlDef: ComponentControlDef): React.ReactNode => {
+    const currentValue = String(values[propName] ?? controlDef.default ?? '');
+    const hasRange = controlDef.min != null && controlDef.max != null && !controlDef.displayStepper;
+
+    switch (controlDef.type) {
+      case 'slider':
+        return (
+          <ToolRow key={propName} label={controlDef.label}>
+            <ToolSlider
+              value={parseFloat(currentValue) || (controlDef.default as number)}
+              onChange={(v) => onChange(propName, v)}
+              min={controlDef.min ?? 0}
+              max={controlDef.max ?? 100}
+              step={controlDef.step ?? 1}
+            />
+            <ToolInput
+              value={currentValue}
+              onChange={(v) => onChange(propName, parseFloat(v) || 0)}
+              step={controlDef.step ?? 1}
+            />
+          </ToolRow>
+        );
+      case 'color':
+        return (
+          <ToolRow key={propName} label={controlDef.label}>
+            <ColorInput
+              value={currentValue || String(controlDef.default)}
+              onChange={(v) => onChange(propName, v)}
+            />
+          </ToolRow>
+        );
+      case 'text':
+        return (
+          <ToolRow key={propName} label={controlDef.label}>
+            <ToolInput
+              value={currentValue}
+              onChange={(v) => onChange(propName, v)}
+              text
+            />
+          </ToolRow>
+        );
+      case 'number':
+        // A number with both min and max DISPLAYS as slider + input (the
+        // reference's Number control), same as the Properties panel.
+        return (
+          <ToolRow key={propName} label={controlDef.label}>
+            {hasRange && (
+              <ToolSlider
+                value={parseFloat(currentValue) || Number(controlDef.default ?? 0)}
+                onChange={(v) => onChange(propName, v)}
+                min={controlDef.min ?? 0}
+                max={controlDef.max ?? 100}
+                step={controlDef.step ?? 1}
+              />
+            )}
+            <ToolInput
+              value={currentValue}
+              onChange={(v) => onChange(propName, parseFloat(v) || 0)}
+              step={controlDef.step ?? 1}
+            />
+          </ToolRow>
+        );
+      case 'toggle':
+        return (
+          <ToolRow key={propName} label={controlDef.label}>
+            <ToolSegmentedControl
+              value={currentValue === 'true' ? 'yes' : 'no'}
+              onChange={(v) => onChange(propName, v === 'yes')}
+              options={YES_NO_OPTIONS}
+            />
+          </ToolRow>
+        );
+      case 'select':
+        return (
+          <ToolRow key={propName} label={controlDef.label}>
+            <ToolSelect
+              value={currentValue}
+              onChange={(v) => onChange(propName, v)}
+              options={(controlDef.options || []).map(o => ({ label: o.label, value: o.value }))}
+            />
+          </ToolRow>
+        );
+      case 'upload':
+        return (
+          <ToolRow key={propName} label={controlDef.label}>
+            <UploadControl
+              value={currentValue}
+              onChange={(v) => onChange(propName, v)}
+              accept={controlDef.accept || 'image/*'}
+              multiple={controlDef.multiple}
+            />
+          </ToolRow>
+        );
+      case 'group':
+        return (
+          <GroupControl
+            key={propName}
+            label={controlDef.label}
+            controls={controlDef.controls ?? {}}
+            renderControl={renderControl}
+          />
+        );
+      case 'transition':
+        return (
+          <TransitionControl
+            key={propName}
+            label={controlDef.label}
+            value={currentValue}
+            onChange={(v) => onChange(propName, v)}
+          />
+        );
+      default:
+        // slot (connected canvas nodes) / font: no editor-preview equivalent.
+        trace.action('ComponentPropsPanel:unrendered-control', { propName, type: controlDef.type });
+        return null;
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -39,91 +164,7 @@ export default function ComponentPropsPanel({ controls, values, onChange }: Comp
           </div>
         ) : (
           <div className="flex flex-col gap-2.5">
-            {entries.map(([propName, controlDef]) => {
-              const currentValue = String(values[propName] ?? controlDef.default ?? '');
-
-              switch (controlDef.type) {
-                case 'slider':
-                  return (
-                    <ToolRow key={propName} label={controlDef.label}>
-                      <ToolSlider
-                        value={parseFloat(currentValue) || (controlDef.default as number)}
-                        onChange={(v) => onChange(propName, v)}
-                        min={controlDef.min ?? 0}
-                        max={controlDef.max ?? 100}
-                        step={controlDef.step ?? 1}
-                      />
-                      <ToolInput
-                        value={currentValue}
-                        onChange={(v) => onChange(propName, parseFloat(v) || 0)}
-                        step={controlDef.step ?? 1}
-                      />
-                    </ToolRow>
-                  );
-                case 'color':
-                  return (
-                    <ToolRow key={propName} label={controlDef.label}>
-                      <ColorInput
-                        value={currentValue || String(controlDef.default)}
-                        onChange={(v) => onChange(propName, v)}
-                      />
-                    </ToolRow>
-                  );
-                case 'text':
-                  return (
-                    <ToolRow key={propName} label={controlDef.label}>
-                      <ToolInput
-                        value={currentValue}
-                        onChange={(v) => onChange(propName, v)}
-                        text
-                      />
-                    </ToolRow>
-                  );
-                case 'number':
-                  return (
-                    <ToolRow key={propName} label={controlDef.label}>
-                      <ToolInput
-                        value={currentValue}
-                        onChange={(v) => onChange(propName, parseFloat(v) || 0)}
-                        step={controlDef.step ?? 1}
-                      />
-                    </ToolRow>
-                  );
-                case 'toggle':
-                  return (
-                    <ToolRow key={propName} label={controlDef.label}>
-                      <ToolSegmentedControl
-                        value={currentValue === 'true' ? 'yes' : 'no'}
-                        onChange={(v) => onChange(propName, v === 'yes')}
-                        options={YES_NO_OPTIONS}
-                      />
-                    </ToolRow>
-                  );
-                case 'select':
-                  return (
-                    <ToolRow key={propName} label={controlDef.label}>
-                      <ToolSelect
-                        value={currentValue}
-                        onChange={(v) => onChange(propName, v)}
-                        options={(controlDef.options || []).map(o => ({ label: o.label, value: o.value }))}
-                      />
-                    </ToolRow>
-                  );
-                case 'upload':
-                  return (
-                    <ToolRow key={propName} label={controlDef.label}>
-                      <UploadControl
-                        value={currentValue}
-                        onChange={(v) => onChange(propName, v)}
-                        accept={controlDef.accept || 'image/*'}
-                        multiple={controlDef.multiple}
-                      />
-                    </ToolRow>
-                  );
-                default:
-                  return null;
-              }
-            })}
+            {entries.map(([propName, controlDef]) => renderControl(propName, controlDef))}
           </div>
         )}
       </div>

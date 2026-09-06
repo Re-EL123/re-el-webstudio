@@ -84,6 +84,7 @@ export function executePaste(opts: PasteOptions): PasteResult {
     interactingVpId: opts.interactingVpId,
     viewportWidths: opts.viewportWidths,
     activeFilePath: opts.activeFilePath,
+    sourceFilePath: data.sourceFilePath ?? null,
   };
 
   const rule = findMatchingRule(ctx);

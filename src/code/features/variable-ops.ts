@@ -1219,6 +1219,29 @@ function captureAndBindTextNode(ast: Parameters<typeof findFirstElementByDataId>
   return capturedText;
 }
 
+/** Bind a text node's content to a component prop that ALREADY exists
+ *  (`{propName}`), leaving the prop's declared default untouched. Used by
+ *  paste/duplicate inside the SAME master: the clone must keep the source
+ *  node's Content variable instead of baking the literal (user rule
+ *  2026-09-06). Falls back to createTextVariableInCode when the prop is not
+ *  declared (should not happen for a same-file copy, but never crash). */
+export function bindTextNodeToPropInCode(code: string, nodeId: string, propName: string): string {
+  const declared = new RegExp(`\\b${propName}\\s*=\\s*["'\`]`).test(code) || new RegExp(`[{,]\\s*${propName}\\s*[,}]`).test(code);
+  if (!declared) return createTextVariableInCode(code, nodeId, propName);
+  const ast = parseJSX(code);
+  if (!ast) return code;
+  const captured = captureAndBindTextNode(ast, nodeId, propName);
+  if (captured === null) return code;
+  try {
+    const output = generate(ast, { retainLines: true }, code);
+    trace.action('variable-ops:bind-text-existing-prop', { nodeId, propName });
+    return output.code;
+  } catch (err) {
+    trace.error('variable-ops:bindTextNodeToProp-generate-failed', { nodeId, propName, error: err instanceof Error ? err.message : String(err) });
+    return code;
+  }
+}
+
 export function createTextVariableInCode(
   code: string,
   nodeId: string,

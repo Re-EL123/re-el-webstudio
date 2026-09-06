@@ -12,6 +12,7 @@
 import { splitStyleProps, toCamel } from '@/shared/css-utils';
 import { trace } from '@/shared/debug-trace';
 import { findNodeRect, getActiveFilePath, getActiveTransform, getInteractingViewport } from '@/canvas/node-ops';
+import { isComponentFilePath } from '@/code/project/active-file-store';
 import { getViewportWidths } from '@/code/stores/viewport-store';
 import { bakeNodeForTile, tileContextFor, type TileContext } from '@/canvas/replica-bake';
 import { projectFS } from '@/code/project/project-fs';
@@ -170,6 +171,8 @@ function toClipboardNode(node: CanvasNode, nodes: Map<string, CanvasNode>, tile:
     attrs: dormant.attrs,
     name: node.name,
     textContent: dormant.textContent,
+    // Component-prop binding of the text — honoured only on a same-master paste.
+    textVariable: node.textVariable,
     hasMixedContent: node.hasMixedContent,
     isCanvasNode: node.isCanvasNode,
     componentFile: node.componentFile,
@@ -381,11 +384,36 @@ function collectOverlays(
  * Returns CopyResult so the call-site can show a toast on failure — but most
  * call-sites today fire-and-forget. Failures are also traced.
  */
+/** Drop component-master variant roots (top-level, not canvas node, not overlay)
+ *  from a copy request. Pure; exported for tests. */
+export function excludeVariantRoots(
+  nodeIds: string[],
+  nodes: Map<string, { parentId?: string | null; isCanvasNode?: boolean; attrs?: Record<string, string> }>,
+  activeFilePath: string,
+): string[] {
+  if (!isComponentFilePath(activeFilePath)) return nodeIds;
+  const kept = nodeIds.filter((id) => {
+    const n = nodes.get(id);
+    const isVariantRoot = !!n && !n.parentId && !n.isCanvasNode && !n.attrs?.['data-overlay'];
+    return !isVariantRoot;
+  });
+  if (kept.length !== nodeIds.length) trace.action('paste-engine.copy:variant-roots-ignored', { dropped: nodeIds.length - kept.length });
+  return kept;
+}
+
 export function copyNodes(
   nodeIds: string[],
   nodes: Map<string, CanvasNode>,
 ): CopyResult {
   trace.fn('paste-engine.copyNodes', { count: nodeIds.length });
+
+  // A design component's VARIANT ROOT is a tile, not a copyable node: its
+  // position lives in variantConfig, its runtime plumbing (overlay refs,
+  // state, handlers) lives in the component function, so a paste of it can
+  // only ever produce a broken fragment ("References undefined identifier:
+  // ovRootRef", 2026-09-06). Ignore it silently — nothing reaches the
+  // clipboard, the previous clipboard content stays. Children are fine.
+  nodeIds = excludeVariantRoots(nodeIds, nodes, getActiveFilePath());
 
   if (nodeIds.length === 0) {
     return { success: false, nodeCount: 0, message: 'Nothing to copy' };
@@ -500,6 +528,7 @@ export function copyNodes(
     effects,
     collections,
     sourceProjectId,
+    sourceFilePath: getActiveFilePath(),
     components,
   };
 

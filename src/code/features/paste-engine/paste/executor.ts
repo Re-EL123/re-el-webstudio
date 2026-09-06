@@ -26,6 +26,7 @@ import {
 import { createNode } from '../core/node-creator';
 import { resolveTargets } from '../core/target-resolver';
 import { reinjectMotionProps } from './motion-reinject';
+import { reinjectTextVariables } from './text-variable-reinject';
 import { computePasteOrderAssignments } from './order-renumber';
 import { reinjectResponsiveBands, reinjectBorderOverlays, reinjectPlaceholderStyles } from './border-reinject';
 import type {
@@ -257,6 +258,8 @@ export function executePaste(
   // declarative Loop) for every pasted copy, descendants included. Queued
   // after the addNode mutations, so the same flush applies them in order.
   reinjectMotionProps(ctx.clipboardNodes, idMapper);
+  // Same-master paste: the clone keeps its Content variable binding.
+  reinjectTextVariables(ctx.clipboardNodes, idMapper, ctx);
 
   // Post-paste pass — re-inject ::after border-overlay rules under the new
   // ids (the border lives in the <style> block, not on the node — it would

@@ -13,6 +13,17 @@ import { getNodesSnapshot } from '@/code/stores/store';
 
 const BASE_SIZE = 8; // px at scale=1
 const MIN_SCALE = 0.2;
+/** The handle is a FIXED screen-space circle (8px, inset 6px). On an element
+ *  that paints small on screen (zoomed out / tiny node) it covered most of the
+ *  box and read as a second selection dot — hide it until the element has room
+ *  for it on BOTH axes (user report 2026-09-06). Screen px, zoom-independent. */
+export const MIN_ELEMENT_SCREEN_PX = 48;
+export function radiusHandleFits(corners: { TL: { x: number; y: number }; TR: { x: number; y: number }; BL: { x: number; y: number } } | null | undefined): boolean {
+  if (!corners) return false;
+  const w = Math.hypot(corners.TR.x - corners.TL.x, corners.TR.y - corners.TL.y);
+  const h = Math.hypot(corners.BL.x - corners.TL.x, corners.BL.y - corners.TL.y);
+  return w >= MIN_ELEMENT_SCREEN_PX && h >= MIN_ELEMENT_SCREEN_PX;
+}
 
 interface Props {
   corners: ScreenCorners;
@@ -32,11 +43,12 @@ export default function BorderRadiusHandle({ corners, nodeId, vpId, color = SELE
   // Include position + hidden in the signature so this logs not just the first
   // render but any LATER move (seed → real rect on render-complete) or scale-gate
   // flip — that's what would make the radius handle appear to "land late".
-  const dbgSig = `${nodeId}|${scale < MIN_SCALE ? 'HID' : 'viz'}|${dbgTl}`;
+  const fits = radiusHandleFits(corners);
+  const dbgSig = `${nodeId}|${scale < MIN_SCALE || !fits ? 'HID' : 'viz'}|${dbgTl}`;
   if (dbgSig !== dbgRef.current) {
     dbgRef.current = dbgSig;
     trace.action('border-radius-handle:state', {
-      nodeId, hidden: scale < MIN_SCALE, scale, tl: dbgTl,
+      nodeId, hidden: scale < MIN_SCALE || !fits, fits, scale, tl: dbgTl,
     });
   }
 
@@ -111,7 +123,7 @@ export default function BorderRadiusHandle({ corners, nodeId, vpId, color = SELE
     window.addEventListener('pointerup', onUp);
   }, [nodeId, vpId, onInteracting]);
 
-  if (scale < MIN_SCALE) return null;
+  if (scale < MIN_SCALE || !fits) return null;
 
   // Fixed screen-space size (same as resize handles)
   const handleSize = BASE_SIZE;

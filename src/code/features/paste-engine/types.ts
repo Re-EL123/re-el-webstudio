@@ -21,6 +21,9 @@ export interface ClipboardNode {
   attrs?: Record<string, string>;
   name?: string;
   textContent?: string;
+  /** Component prop the text is bound to (`{prop}`) — kept on a paste into
+   *  the SAME master, baked to `textContent` elsewhere. */
+  textVariable?: string;
   hasMixedContent?: boolean;
   isCanvasNode?: boolean;
   componentFile?: string | null;
@@ -124,6 +127,9 @@ export interface ClipboardData {
    * bare tags whose masters don't exist in the target.
    */
   sourceProjectId?: string | null;
+  /** The file the copy was made in — a paste into the same design component
+   *  master keeps variable bindings (`textVariable`). */
+  sourceFilePath?: string | null;
 
   /**
    * Masters for every component instance in `nodes` (deduped by path).
@@ -204,6 +210,8 @@ export interface PasteContext {
    * component file (replica = variant entry) vs page file (replica = @container).
    */
   activeFilePath?: string;
+  /** From ClipboardData.sourceFilePath (see textVariable). */
+  sourceFilePath?: string | null;
 
   // Live nodes map — passed in by the call-site.
   nodes: Map<string, CanvasNode>;

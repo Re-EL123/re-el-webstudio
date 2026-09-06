@@ -2052,9 +2052,13 @@ export default function ComponentPropsTool() {
       <>
       <div
         ref={revealRef}
-        className="cut-corners transition-[box-shadow,background-color] duration-500"
+        // Cut-corner shell: the clip-path slices any shadow/outline ring at the
+        // two diagonals (the flash ring showed square corners cut off). A real
+        // `border` + the `.cut-border` diagonal stroke (accent as
+        // --cut-border-color) follows the clip — same rule as every other cut
+        // shell in the editor (2026-09-06).
+        className={`cut-corners cut-border border transition-[border-color,background-color] duration-500 ${revealFlash ? 'border-[var(--accent-secondary,#a855f7)] [--cut-border-color:var(--accent-secondary,#a855f7)]' : 'border-transparent [--cut-border-color:transparent]'}`}
         style={revealFlash ? {
-          boxShadow: 'inset 0 0 0 1.5px var(--accent-secondary, #a855f7)',
           backgroundColor: 'color-mix(in srgb, var(--accent-secondary, #a855f7) 8%, transparent)',
         } : undefined}
       >

@@ -142,7 +142,7 @@ import {
   updateSelectCaretRuleInCode,
   removePseudoStyleInCode,
 } from '../generation/generator-styles';
-import { createVariableInCode, createConditionalVariableInCode, removeVariableInCode, createTextVariableInCode, removeTextVariableInCode, bindTextNodeAsPageVarInCode, bindTextVariableForVariantInCode, createLinkAttrVariableInCode, removeLinkAttrVariableInCode, setBorderOverlayVariableForVariant, setInlineVariableForVariant, removeVariantStyleVariableInCode, setComponentPropDefaultInCode, createTypedVariableInCode, addBarePropToFunctionInCode, deleteComponentVariableInCode, renameComponentVariableInCode } from '../features/variable-ops';
+import { bindTextNodeToPropInCode, createVariableInCode, createConditionalVariableInCode, removeVariableInCode, createTextVariableInCode, removeTextVariableInCode, bindTextNodeAsPageVarInCode, bindTextVariableForVariantInCode, createLinkAttrVariableInCode, removeLinkAttrVariableInCode, setBorderOverlayVariableForVariant, setInlineVariableForVariant, removeVariantStyleVariableInCode, setComponentPropDefaultInCode, createTypedVariableInCode, addBarePropToFunctionInCode, deleteComponentVariableInCode, renameComponentVariableInCode } from '../features/variable-ops';
 import { addPageVariableInCode, removePageVariableInCode, updatePageVariableInCode } from '../features/page-variables';
 import { applyDeleteVariablePipeline } from '../features/delete-variable-pipeline';
 import { setPropDescriptionInCode, setPropTypeInCode, setPropOptionsInCode, setPropLabelInCode, setPropNumberMetaInCode, setPropVariantOfInCode, getPropType, getPropDescription, getPropOptions, getPropLabel, getPropVariantOf } from '../components/prop-meta';
@@ -321,6 +321,8 @@ export type Mutation =
    * instead of style values.
    */
   | { type: 'createTextVariable'; nodeId: string; propName: string; defaultValue: string }
+  /** Bind a text node to an EXISTING component prop (`{prop}`), default untouched. */
+  | { type: 'bindTextVariable'; nodeId: string; propName: string }
   /** Inline a text variable back to literal JSX text + remove the prop. */
   | { type: 'removeTextVariable'; nodeId: string; propName: string; defaultValue: string; deleteProp?: boolean }
   /** PAGE text variable: bind a text node to a settable @pageVariables state var (useState),
@@ -2916,6 +2918,9 @@ function applyMutationCore(code: string, mutation: Mutation): string {
         if (oldVariantOf) c = setPropVariantOfInCode(c, mutation.newName, oldVariantOf);
         return c;
       }
+      case 'bindTextVariable':
+        return bindTextNodeToPropInCode(code, mutation.nodeId, mutation.propName);
+
       case 'createTextVariable': {
         // A text-content variable IS the Plain Text type — tag it in @propMeta so it reads as
         // 'plainText' everywhere (icon/modal resolve from the type, not CSS-prop inference), exactly like

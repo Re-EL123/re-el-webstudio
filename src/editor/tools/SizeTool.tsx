@@ -6,7 +6,7 @@
 import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { useLivePreview } from '../hooks/useLivePreview';
 import { useAtomValue, useSetAtom, getDefaultStore } from 'jotai';
-import { canvasInteractingAtom, getNodesSnapshot } from '@/code/stores/store';
+import { canvasInteractingAtom, getNodesSnapshot, selectedIdsAtom } from '@/code/stores/store';
 import { useNode, useNodesComputed } from '@/code/stores/node-family';
 import { injectFlexLayoutOnFrame, shouldInjectLayoutOnAuto, freezeParentRelativeChildrenForAuto } from './layout-injection';
 import { viewportsConfigAtom, viewportWidthsAtom, syncViewportWidths, activeComponentVariantAtom } from '@/code/stores/viewport-store';
@@ -688,6 +688,20 @@ export default function SizeTool({ styles: stylesProp, nodeId: nodeIdProp, vpId,
   // them — same UX as the reference's disabled "Fit Content" on code components.
   // Concrete units (px/%/vw/vh/fill) all resolve to a definite size and
   // stay available.
+  // MULTI-SELECT: the generic writers (onUpdate / onUpdateMultiple) fan out
+  // over the whole selection, but the design-INSTANCE hug mutations below
+  // were queued for `nodeId` alone — with several instances selected only
+  // the last one hugged (user report 2026-09-06). Apply them to every
+  // selected instance (page instances; masters/other nodes are skipped).
+  const selectedIdsForSize = useAtomValue(selectedIdsAtom);
+  const forEachSelectedInstance = useCallback((fn: (id: string) => void) => {
+    const ids = selectedIdsForSize.length > 1 ? selectedIdsForSize : [nodeId];
+    const snap = getNodesSnapshot();
+    for (const id of ids) {
+      const n = snap.get(id);
+      if (id === nodeId || (n?.componentFile != null && !n.isCodeComponent)) fn(id);
+    }
+  }, [selectedIdsForSize, nodeId]);
   const selfNodeSub = useNode(nodeId);
   const isCodeComponentInstance = selfNodeSub?.isCodeComponent === true;
   const disableAutoForCode = useCallback(
@@ -977,12 +991,14 @@ export default function SizeTool({ styles: stylesProp, nodeId: nodeIdProp, vpId,
         if (!activeVar && interactVp && !interactVp.isPrimary) {
           if (unfill) onUpdateMultiple({ width: 'auto', ...unfill });
           else onUpdate('width', 'auto');
-          queueMutation({ type: 'ensureInstanceHugMarker', nodeId, dim: 'width' });
+          forEachSelectedInstance((id) => queueMutation({ type: 'ensureInstanceHugMarker', nodeId: id, dim: 'width' }));
           trace.action('size:unit-change', { label: 'W', from: fromUnit, to: toUnit, value: 0, instanceHugMaster: true, viewportBand: interactVp.id, unfill: !!unfill });
           return;
         }
-        if (unfill) queueMutation({ type: 'updateStyles', nodeId, styles: { ...unfill } });
-        queueMutation({ type: 'autoSizeInstanceDim', nodeId, dim: 'width', activeVariant: activeVar });
+        forEachSelectedInstance((id) => {
+          if (unfill) queueMutation({ type: 'updateStyles', nodeId: id, styles: { ...unfill } });
+          queueMutation({ type: 'autoSizeInstanceDim', nodeId: id, dim: 'width', activeVariant: activeVar });
+        });
         trace.action('size:unit-change', { label: 'W', from: fromUnit, to: toUnit, value: 0, instanceHugMaster: true, activeVar: activeComponentVariant, unfill: !!unfill });
         return;
       }
@@ -1121,12 +1137,14 @@ export default function SizeTool({ styles: stylesProp, nodeId: nodeIdProp, vpId,
         if (!activeVar && interactVp && !interactVp.isPrimary) {
           if (unfill) onUpdateMultiple({ height: 'auto', ...unfill });
           else onUpdate('height', 'auto');
-          queueMutation({ type: 'ensureInstanceHugMarker', nodeId, dim: 'height' });
+          forEachSelectedInstance((id) => queueMutation({ type: 'ensureInstanceHugMarker', nodeId: id, dim: 'height' }));
           trace.action('size:unit-change', { label: 'H', from: fromUnit, to: toUnit, value: 0, instanceHugMaster: true, viewportBand: interactVp.id, unfill: !!unfill });
           return;
         }
-        if (unfill) queueMutation({ type: 'updateStyles', nodeId, styles: { ...unfill } });
-        queueMutation({ type: 'autoSizeInstanceDim', nodeId, dim: 'height', activeVariant: activeVar });
+        forEachSelectedInstance((id) => {
+          if (unfill) queueMutation({ type: 'updateStyles', nodeId: id, styles: { ...unfill } });
+          queueMutation({ type: 'autoSizeInstanceDim', nodeId: id, dim: 'height', activeVariant: activeVar });
+        });
         trace.action('size:unit-change', { label: 'H', from: fromUnit, to: toUnit, value: 0, instanceHugMaster: true, activeVar: activeComponentVariant, unfill: !!unfill });
         return;
       }

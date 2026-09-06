@@ -22,6 +22,7 @@ import { shouldSkipLaggingForcedRender } from './render-integrity';
 import { autoFocusLayersAtom } from '@/code/stores/user-preferences-store';
 import { snappedRulerGuideIdsAtom } from '@/code/stores/ruler-guides-store';
 import { overlayEditingIdAtom, overlayCallsAtom } from '@/code/stores/overlay-store';
+import { prePlaceOverlayForEdit } from '@/canvas/overlay-preplace';
 import { setViewportHeaderOverlayEditMode } from './ViewportHeaderManager';
 import { activeLocaleAtom, isDefaultLocaleAtom, i18nConfigAtom, localeOverridesAtom } from '@/code/stores/locale-store';
 import {
@@ -35,7 +36,7 @@ import ToolbarGhost from './ui/ToolbarGhost';
 import CanvasRulers from './ui/CanvasRulers';
 import RulerGuides from './ui/RulerGuides';
 import Comments from './ui/Comments';
-import { getViewportPrefix, setStyleContext, setUpdatingFromCanvasFlagger, setForceCanvasRender, setReplicaOverridesGetter, getNodeHitsAtPoint, injectCanvasCSS, removeCanvasCSS, forceCanvasRender } from './node-ops';
+import { getContentRoot, getViewportPrefix, setStyleContext, setUpdatingFromCanvasFlagger, setForceCanvasRender, setReplicaOverridesGetter, getNodeHitsAtPoint, injectCanvasCSS, removeCanvasCSS, forceCanvasRender } from './node-ops';
 import { registerTextEditCommitter } from './text-edit-committer';
 // redirectToComponentInstance, redirectToCollectionTemplate, redirectToFitTextWrapper,
 // redirectLayoutNodeToViewport, getIsolatedChildOfGroup, vpIdFromPrefix,
@@ -235,7 +236,20 @@ export default function Canvas() {
     // `z-index: 50` lifts the shown overlay above the canvas tint (z-index 10)
     // so a canvas-node overlay pops over the dimmed canvas, not under it.
     const showSelector = `[data-id="${overlayEditingId}"][data-overlay-node]`;
-    injectCanvasCSS(showSelector, '/*persist*/ display: block !important; z-index: 50 !important;');
+    // Place the overlay at its final position BEFORE the show rule paints it —
+    // otherwise it flashes at its stale left/top for a frame and snaps
+    // (see overlay-preplace.ts).
+    { const root = getContentRoot(); if (root) prePlaceOverlayForEdit(overlayEditingId, root); }
+    // Reveal with the overlay's OWN display (flex / grid / block), never a
+    // hard `block`: a forced block wiped the overlay's flex on the canvas, so
+    // its children lost the centering and the layout detector read the
+    // overlay as a non-layout parent — a child drag started as ABSOLUTE
+    // while the live site (no override) laid it out fine (2026-09-06).
+    const ovNode = getNodesSnapshot().get(overlayEditingId);
+    const ovEntry = (ovNode?.motionVariants as Record<string, Record<string, string>> | undefined)?.default;
+    const ovDisplay = String(ovEntry?.display || ovNode?.styles?.display || 'block');
+    const showDisplay = /^(flex|grid|inline-flex|inline-grid|block|inline-block)$/.test(ovDisplay) ? ovDisplay : 'block';
+    injectCanvasCSS(showSelector, `/*persist*/ display: ${showDisplay} !important; z-index: 50 !important;`);
     injectCanvasCSS('[data-viewport]', '/*persist*/ position: relative;');
     // Accent tint (standard, kept LIGHT) over viewports AND root-level
     // canvas nodes — every parentless thing on the canvas EXCEPT the edited

@@ -32,6 +32,7 @@ import {
 import { trace } from '@/shared/debug-trace';
 // ToolPopupContext no longer provided — controls open standalone popups for full-size editors
 import MotionPropsEditor, { buildTransformPreview } from '../motion/MotionPropsEditor';
+import { expediteStableAtomSync } from '@/canvas/hooks/useStableAtomSync';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -251,6 +252,7 @@ export default function KeyframeSheet() {
   const writeKeyframe = (updated: KeyframeAnimation) => {
     const css = formatKeyframes(updated);
     trace.action('keyframe-sheet:write-keyframe', { name: updated.name, stops: updated.stops.length });
+    expediteStableAtomSync();
     queueMutation({ type: 'updateKeyframes', name: updated.name, css });
     // Flush synchronously so tokens.css is written before we refresh canvas + re-read atom
     flushNow();

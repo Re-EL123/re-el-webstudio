@@ -127,3 +127,24 @@ function HuPoJi({ style, initialVariant = 'default' }) {
     expect(Array.from(child!.hiddenOnVariants ?? [])).toEqual(['default']);
   });
 });
+
+// A foreign gate (overlay open-state) on the LEFT of the variant test — the
+// generator keeps it verbatim; the hidden set is the variant part.
+describe('parser hiddenOnVariants — foreign gate && variant test', () => {
+  it('parses `ovOpen && variant !== "default"` as hidden on default', () => {
+    const nodes = parseJSXToNodes(wrap(`
+      <AnimatePresence>{ovOpen && variant !== 'default' && (
+        <motion.div key="ov-1" data-id="ov-1" />
+      )}</AnimatePresence>
+    `));
+    expect([...(nodes.get('ov-1')?.hiddenOnVariants ?? [])]).toEqual(['default']);
+  });
+  it('a bare foreign gate `ovOpen && <el/>` hides nowhere', () => {
+    const nodes = parseJSXToNodes(wrap(`
+      <AnimatePresence>{ovOpen && (
+        <motion.div key="ov-1" data-id="ov-1" />
+      )}</AnimatePresence>
+    `));
+    expect(nodes.get('ov-1')?.hiddenOnVariants ?? new Set()).toEqual(new Set());
+  });
+});

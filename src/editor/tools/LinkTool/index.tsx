@@ -43,6 +43,7 @@ import LinkRelControl from './LinkRelControl';
 import LinkParamsControl from './LinkParamsControl';
 import { parseRelTokens, isUserRelToken } from './link-rel-utils';
 import LinkSlugControl, { type CmsNavMode, type SlugVariantContext } from './LinkSlugControl';
+import { expediteStableAtomSync } from '@/canvas/hooks/useStableAtomSync';
 
 /** Slugify an anchor name. NOT cms-ops' slugify: this one hyphenates punctuation ('a.b' -> 'a-b', cms-ops deletes it) and has no 'untitled' fallback — ids/tokens generated here must stay stable. Do not merge (phase-9 9.1c). */
 function slugify(str: string): string {
@@ -482,6 +483,7 @@ export default function LinkTool() {
     }
     trace.action('link-tool:detach-variable', { nodeId, attrName, propName, kind });
     // The × on the pill (PRIMARY, no per-viewport branches) UNBINDS this node only — keep the variable.
+    expediteStableAtomSync();
     queueMutation({ type: 'removeLinkAttrVariable', nodeId, attrName, propName, kind, keepVariable: true });
     flushNow();
   }, [nodeId, replicaQuery, masterVars, node?.type, activeFile, hrefBase]);

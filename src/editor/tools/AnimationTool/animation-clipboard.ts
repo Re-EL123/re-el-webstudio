@@ -25,6 +25,7 @@ import type { AnimEntryType } from './shared';
 import type { TextAnimConfig } from './motion/text-anim-presets';
 import { getActiveAnimationScope } from './animation-scope-source';
 import { appearReveal, appearUnionKeys } from './appear-utils';
+import { expediteStableAtomSync } from '@/canvas/hooks/useStableAtomSync';
 
 /** A single copied animation entry (separate from the CSS-style clipboard and the OS clipboard). */
 export interface CopiedAnimation {
@@ -134,6 +135,7 @@ export function applyCopiedAnimation(copied: CopiedAnimation, nodeId: string, no
     case 'textEffect':
       // The target row exists only because the node already carries a text anim,
       // so updateTextAnim re-applies the copied config (regenerating the split).
+      expediteStableAtomSync();
       queueMutation({ type: 'updateTextAnim', nodeId, config: copied.config as TextAnimConfig });
       break;
 

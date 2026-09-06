@@ -26,6 +26,11 @@ import { triggerAutosave } from '@/backend/autosave';
 import { dragStateOps } from '@/canvas/drag/drag-state-store';
 import { createDeferredDragFlush } from './deferred-drag-flush';
 import { trace } from '@/shared/debug-trace';
+import { expediteStableAtomSync } from './useStableAtomSync';
+
+/** Below this node count the stable-mirror cascade is cheap enough that an
+ *  undo needs no canvas-paint-first budget. */
+const SMALL_PAGE_NODE_COUNT = 200;
 import { refreshCanvasTokens } from '../node-ops';
 import { getCanvasRenderer } from '../CanvasRenderer';
 
@@ -74,6 +79,12 @@ export function useMutationQueueLifecycle({
         // 5. Defer the React fan-out (setCode → panels/atoms) through the
         //    FENCED queue mechanism — applied early by any empty-queue flush,
         //    cancelled by a file switch, forced by the next undo/redo.
+        // Panels that read the STABLE mirror (Overlays row, CMS pills, page
+        // variables) otherwise catch up 450ms after the canvas — the delay
+        // exists to let a BIG page's canvas paint first. On a small page the
+        // mirror cascade is a few ms, so there is nothing to protect: let the
+        // panel land with the canvas ("undo brings the row back ~1s late").
+        if (restoredNodes.size <= SMALL_PAGE_NODE_COUNT) expediteStableAtomSync();
         scheduleQueueFanOut();
         // Re-inject CSS tokens from restored tokens.css (undo may have changed them)
         refreshCanvasTokens();

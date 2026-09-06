@@ -1594,8 +1594,14 @@ export function renderNodes(
         if (_isComponentMaster) {
           // Component variant: `getResponsiveOverridesForNode` bails for masters; resolve
           // the per-variant hide (`hiddenOnVariants`) instead. Here `vp.id` IS the variant.
+          // The PRIMARY tile's `vp.id` is the viewport id ('desktop'), not the
+          // variant name — the node pass maps it to 'default' (see `variantName`
+          // above). Passing `vp.id` raw asked `hiddenOnVariants.has('desktop')`,
+          // so a hide synced onto every variant hid the hover tile but the
+          // primary kept showing the overlay (live find 2026-09-06).
+          const tileVariant = isPrimary ? 'default' : vp.id;
           const ovNode = nodes.get(overlaySrcId);
-          if (ovNode) hideThisTile = resolveVariantStyles(ovNode, vp.id, vp.width).display === 'none';
+          if (ovNode) hideThisTile = resolveVariantStyles(ovNode, tileVariant, vp.width).display === 'none';
         } else {
           hideThisTile = getResponsiveOverridesForNode(overlaySrcId, vp.width).display === 'none';
         }

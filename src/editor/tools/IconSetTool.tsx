@@ -48,6 +48,7 @@ import ControlLabel from '../controls/ControlLabel';
 import ToolPopup from '../ui/ToolPopup';
 import Button from '@/design-system/Button';
 import { trace } from '@/shared/debug-trace';
+import { expediteStableAtomSync } from '@/canvas/hooks/useStableAtomSync';
 
 export default function IconSetTool() {
   const { node, nodeId } = useControl();
@@ -153,6 +154,7 @@ export default function IconSetTool() {
     // The base default name (`node.attrs.name`, the literal or the ternary's
     // default) is what a replica override clears back to.
     const baseName = (node?.attrs?.name as string | undefined) ?? iconSet.icons[0]?.id ?? '';
+    expediteStableAtomSync();
     modifyProjectFile(activeFile, (code) => {
       if (isReplica) {
         return setResponsiveOverride(code, nodeId, iconSet.exportName, vpWidth, 'name', iconId, baseName);

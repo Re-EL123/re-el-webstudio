@@ -22,7 +22,7 @@ import { localCssPropForVar } from '@/code/components/prop-css-mapping';
 import { resolveVariableIconKey, acceptedVariableFamilies } from './VariableTypeIcon';
 import { copiedStyleAtom, buildCopiedStyle, canPasteStyle, buildPastePayload, isMotionTransformTarget } from './style-clipboard';
 import { getVariableType } from './variable-types';
-import { activeLocaleAtom, isDefaultLocaleAtom, localeOverridesAtom } from '@/code/stores/locale-store';
+import { activeLocaleAtom, isDefaultLocaleAtom, localeOverridesAtom, i18nConfigAtom } from '@/code/stores/locale-store';
 import { activeFilePathAtom, isTemplateFilePath } from '@/code/project/active-file-store';
 import { setNodeOverride } from '@/code/project/locale-ops';
 import { presetTokensAtom } from '@/code/stores/preset-store';
@@ -249,6 +249,7 @@ export default function ControlLabel({ label, property, plain, forceShow, hideCr
   // Locale awareness
   const activeLocale = useAtomValue(activeLocaleAtom);
   const isDefaultLocale = useAtomValue(isDefaultLocaleAtom);
+  const hasMultipleLocales = useAtomValue(i18nConfigAtom).locales.length > 1;
   const localizeHidden = useLocalizeHidden();
   const localeOverrides = useAtomValue(localeOverridesAtom);
   const setLocaleOverrides = useSetAtom(localeOverridesAtom);
@@ -586,6 +587,8 @@ export default function ControlLabel({ label, property, plain, forceShow, hideCr
     // selection isn't a thing; user rule 2026-07-30). Central gate so every
     // Variant row (ComponentPropsTool, instance panels) drops the item.
     onOpenLocalize: (localizeHidden || hideLocalize || property === 'initialVariant') ? undefined : () => { setMenuOpen(false); setLocalizeOpen(true); },
+    isVariantTile: isComponentFile && !isPrimary,
+    hasMultipleLocales,
     // CMS-template field binding context — `getCmsBindingMenuItems` reads
     // this to render the "Bind to Field" submenu and the per-property
     // unbind action. Null when the selected node isn't inside a `.map()`

@@ -61,6 +61,37 @@ import traverse from '@babel/traverse';
  *  `hiddenVariants`: variants where element should be HIDDEN.
  *  `allVariants`: every variant name from variantConfig (for inversion).
  *  `identifierName`: 'variant' or 'initialVariant' (caller decides). */
+/** Is this expression PURELY a variant-visibility condition (what
+ *  buildVisibilityCondition emits)? Anything else on the left of the `&&` is a
+ *  FOREIGN gate the element owner put there — e.g. an overlay's
+ *  `{overlayXOpen && (<overlay/>)}` open-state. Overwriting it with the variant
+ *  test made a hidden→unhidden overlay ALWAYS mounted (fixed at 0,0 on live,
+ *  painted over its trigger on the canvas) and removal could no longer find
+ *  its `{var && (` wrapper (live find 2026-09-06). */
+function isVariantCondition(e: t.Node | null | undefined): boolean {
+  if (!e) return false;
+  if (t.isBooleanLiteral(e)) return true;
+  if (t.isBinaryExpression(e)) {
+    return (e.operator === '===' || e.operator === '!==')
+      && t.isIdentifier(e.left) && (e.left.name === 'variant' || e.left.name === 'initialVariant')
+      && t.isStringLiteral(e.right);
+  }
+  if (t.isLogicalExpression(e) && (e.operator === '&&' || e.operator === '||')) {
+    return isVariantCondition(e.left) && isVariantCondition(e.right);
+  }
+  return false;
+}
+
+/** Split an existing wrapper condition into `{ gate, cond }`: `gate` is the
+ *  foreign part to keep verbatim (or null), `cond` the variant part we own. */
+function splitGate(left: t.Expression): { gate: t.Expression | null } {
+  if (isVariantCondition(left)) return { gate: null };
+  if (t.isLogicalExpression(left) && left.operator === '&&' && isVariantCondition(left.right) && !isVariantCondition(left.left)) {
+    return { gate: left.left };
+  }
+  return { gate: left };
+}
+
 function buildVisibilityCondition(
   hiddenVariants: string[],
   allVariants: string[],
@@ -323,9 +354,21 @@ export function setVariantVisibilityInCode(
 
   if (hiddenVariants.length === 0) {
     if (existingWrapperIdx >= 0) {
-      // Unwrap: replace AnimatePresence wrapper with the bare element.
-      parent.children.splice(existingWrapperIdx, 1, target);
-      trace.action('generator:setVariantVisibility:unwrap', { nodeId });
+      const wrapper = parent.children[existingWrapperIdx] as t.JSXElement;
+      const gateExpr = wrapper.children.find(
+        (c): c is t.JSXExpressionContainer => t.isJSXExpressionContainer(c) && t.isLogicalExpression(c.expression) && c.expression.operator === '&&',
+      );
+      const gate = gateExpr ? splitGate((gateExpr.expression as t.LogicalExpression).left).gate : null;
+      if (gate && gateExpr) {
+        // A foreign gate owns this wrapper (overlay open-state): restore
+        // `{gate && <el/>}` and keep the AnimatePresence — never unwrap.
+        (gateExpr.expression as t.LogicalExpression).left = gate;
+        trace.action('generator:setVariantVisibility:restore-gate', { nodeId });
+      } else {
+        // Unwrap: replace AnimatePresence wrapper with the bare element.
+        parent.children.splice(existingWrapperIdx, 1, target);
+        trace.action('generator:setVariantVisibility:unwrap', { nodeId });
+      }
     }
     // Element is now (or already was) plain — no further changes.
     void wrappedTargetIdx;
@@ -350,8 +393,10 @@ export function setVariantVisibilityInCode(
       const expr = innerChild.expression;
       if (!t.isLogicalExpression(expr) || expr.operator !== '&&') continue;
       // Mutate in-place: keep the same JSXExpressionContainer, swap the
-      // condition.
-      expr.left = condition;
+      // condition — but KEEP a foreign gate: `{gate && <cond>}`.
+      const { gate } = splitGate(expr.left);
+      expr.left = gate ? t.logicalExpression('&&', gate, condition) : condition;
+      if (gate) trace.action('generator:setVariantVisibility:keep-gate', { nodeId });
       break;
     }
     trace.action('generator:setVariantVisibility:update-condition', {

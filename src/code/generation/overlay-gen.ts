@@ -83,6 +83,26 @@ function findOverlayBlockSpan(code: string, overlayId: string, varName: string):
     if (code.slice(j - varName.length + 1, j + 1) === varName) {
       j -= varName.length; skipWsBack();
       if (code[j] === '{') start = j;
+    } else {
+      // The condition is not the bare state var: a per-variant hide rewrote it
+      // to `{varName && variant !== 'x' && (` (or, pre-fix, `{variant !== 'x' && (`).
+      // Walk back to the expression's opening `{` at paren depth 0 — the whole
+      // conditional goes, whatever the condition (live find 2026-09-06: a
+      // removal that bailed here left `{variant !== "default" && }` → parse error).
+      let depth = 0;
+      let k = j;
+      let quote: string | null = null;
+      for (; k >= 0; k--) {
+        const ch = code[k];
+        if (quote) { if (ch === quote && code[k - 1] !== '\\') quote = null; continue; }
+        if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue; }
+        if (ch === ')') depth++;
+        else if (ch === '(') { if (depth === 0) break; depth--; }
+        else if (ch === '}') depth++;
+        else if (ch === '{') { if (depth === 0) { start = k; break; } depth--; }
+        else if (ch === '<' || ch === '>') break; // ran into JSX — not a wrapper
+      }
+      if (start >= 0) trace.action('overlay-gen:remove:compound-condition', { overlayId, condition: code.slice(start + 1, j + 1).trim().slice(0, 80) });
     }
   }
   if (start < 0) return null; // unrecognized wrapper — leave untouched

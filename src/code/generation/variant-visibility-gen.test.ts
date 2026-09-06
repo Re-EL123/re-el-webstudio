@@ -106,3 +106,40 @@ function Comp({ initialVariant = 'default' }) {
     expect(out).toContain('x: -50');
   });
 });
+
+// ─── foreign gate (overlay open-state) preserved ────────────────────────────
+// `{overlayOpen && (<overlay/>)}` is the overlay's OWN AnimatePresence gate.
+// Hiding on a variant must AND the variant test into it, and unhiding
+// everywhere must restore the bare gate — never overwrite or unwrap it
+// (overlay always-mounted at fixed 0,0 on live, 2026-09-06).
+describe('setVariantVisibilityInCode — foreign gate', () => {
+  const ALL = ['default', 'default-hover'];
+  const gated = COMPONENT_SHELL(`
+    <AnimatePresence>{ovOpen && (
+      <motion.div key="ov-1" data-id="ov-1" data-overlay='{"type":"relative"}' />
+    )}</AnimatePresence>
+  `);
+  it('keeps the gate when hiding: `{ovOpen && variant !== "default" && …}`', () => {
+    const out = setVariantVisibilityInCode(gated, 'ov-1', ['default'], ALL);
+    expect(out).toMatch(/\{ovOpen\s*&&\s*initialVariant\s*!==\s*['"]default['"]\s*&&/);
+    expect(out.match(/<AnimatePresence/g)?.length).toBe(1);
+  });
+  it('hidden on ALL variants keeps the gate: `{ovOpen && false && …}`', () => {
+    const out = setVariantVisibilityInCode(gated, 'ov-1', ALL, ALL);
+    expect(out).toMatch(/\{ovOpen\s*&&\s*false\s*&&/);
+  });
+  it('unhiding everywhere restores the bare gate and keeps the wrapper', () => {
+    const hidden = setVariantVisibilityInCode(gated, 'ov-1', ['default'], ALL);
+    const out = setVariantVisibilityInCode(hidden, 'ov-1', [], ALL);
+    expect(out).toMatch(/\{ovOpen\s*&&\s*<motion\.div/);
+    expect(out).not.toMatch(/initialVariant/);
+    expect(out).toContain('<AnimatePresence');
+  });
+  it('updating the hidden set replaces only the variant part', () => {
+    const hidden = setVariantVisibilityInCode(gated, 'ov-1', ['default'], ALL);
+    const out = setVariantVisibilityInCode(hidden, 'ov-1', ['default-hover'], ALL);
+    expect(out).toMatch(/\{ovOpen\s*&&\s*initialVariant\s*!==\s*['"]default-hover['"]\s*&&/);
+    expect(out).not.toMatch(/!==\s*['"]default['"]/);
+    expect((out.match(/ovOpen/g) ?? []).length).toBe(1);
+  });
+});

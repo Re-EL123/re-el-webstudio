@@ -134,15 +134,20 @@ function usePointerDrag(
       onDrag(ev.clientX - r.left, ev.clientY - r.top, r);
     };
 
+    // End on `pointercancel` too (touch/gesture interruption, capture lost):
+    // a scrub that never ended left `panelScrubAtom` stuck true, and every
+    // LATER canvas drag lost its InteractionOutline (live find 2026-09-06).
     const handleUp = (ev: PointerEvent) => {
-      el.releasePointerCapture(ev.pointerId);
+      try { el.releasePointerCapture(ev.pointerId); } catch { /* already released */ }
       el.removeEventListener('pointermove', handleMove);
       el.removeEventListener('pointerup', handleUp);
+      el.removeEventListener('pointercancel', handleUp);
       setInteracting?.(false);
     };
 
     el.addEventListener('pointermove', handleMove);
     el.addEventListener('pointerup', handleUp);
+    el.addEventListener('pointercancel', handleUp);
   }, [onDrag, setInteracting]);
 
   return { ref, onPointerDown: handlePointerDown };

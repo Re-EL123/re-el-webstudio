@@ -24,6 +24,7 @@ import { defaultForType, type PageVariable, type PageVariableType } from '@/code
 import { queueMutation } from '@/code/mutation/mutation-queue';
 import { VariableTypeIcon, resolveVariableIconKey } from '../controls/VariableTypeIcon';
 import { trace } from '@/shared/debug-trace';
+import { expediteStableAtomSync } from '@/canvas/hooks/useStableAtomSync';
 
 // ─── Types & constants ──────────────────────────────────────────────────────
 
@@ -147,6 +148,7 @@ export default function PageVariablesModal() {
     };
     if (draftQueryParam) variable.queryParam = draftQueryParam;
     trace.action('page-vars-modal:create', variable);
+    expediteStableAtomSync();
     queueMutation({ type: 'addPageVariable', variable });
     // Switch into view mode for the freshly-created variable so the user can
     // continue tweaking it without closing the modal.
@@ -162,6 +164,7 @@ export default function PageVariablesModal() {
     if (selected.default !== draftDefault) updates.default = draftDefault;
     if ((selected.queryParam ?? '') !== draftQueryParam) updates.queryParam = draftQueryParam;
     trace.action('page-vars-modal:save', { oldName: selected.name, updates });
+    expediteStableAtomSync();
     queueMutation({ type: 'updatePageVariable', oldName: selected.name, updates });
     setSelectedName(draftName); // follow the rename
   }, [isValid, dirty, selected, draftName, draftType, draftDefault, draftQueryParam]);
@@ -169,6 +172,7 @@ export default function PageVariablesModal() {
   const handleRemove = useCallback(() => {
     if (!selected) return;
     trace.action('page-vars-modal:remove', { name: selected.name });
+    expediteStableAtomSync();
     queueMutation({ type: 'removePageVariable', name: selected.name });
     // Move selection to whatever's left, or fall to create mode if the list is now empty.
     const remaining = variables.filter(v => v.name !== selected.name);

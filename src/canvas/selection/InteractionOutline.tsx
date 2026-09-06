@@ -9,8 +9,9 @@
 // attribute writes the RAF callback is the only thing between cornersCache and
 // paint, so the outline tracks the element as tightly as the cache can supply.
 
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { useAtomValue } from 'jotai';
+import { dragStateOps } from '@/canvas/drag/drag-state-store';
 import { selectedNodeAtom, canvasInteractingAtom, isRotatingAtom, panelScrubAtom, isComponentSelectedAtom } from '@/code/stores/store';
 import { interactingViewportIdAtom } from '@/code/stores/viewport-store';
 import { getScreenCornersById, cornersEqual, type ScreenCorners } from '@/canvas/resize/geometry-utils';
@@ -85,7 +86,12 @@ export default function InteractionOutline() {
   // Also hidden for PANEL VALUE SCRUBS (color picker / slider / chevron hold):
   // nothing moves, and the outline sits exactly on the edge whose border,
   // radius or fill the user is watching change (live find 2026-09-06).
-  const active = !!(isInteracting && selectedId && !isRotating && !isPanelScrub);
+  // A REAL element drag / resize always shows the outline, whatever the panel
+  // scrub flag says — the flag only exists to hide the outline during a
+  // value scrub (color picker, slider, chevron), never during a geometric
+  // gesture; a scrub left stuck must not be able to blank canvas drags.
+  const isElementGesture = useSyncExternalStore(dragStateOps.subscribe, dragStateOps.get);
+  const active = !!(isInteracting && selectedId && !isRotating && (!isPanelScrub || isElementGesture));
 
   // Synchronously seed the four <line> attributes with the initial corners
   // BEFORE the browser paints. Without this the outline mounts with empty

@@ -8,7 +8,7 @@
 // later (trace 2026-08-08). `expediteStableAtomSync()` marks the next mirror as
 // panel-originated so it runs on the next tick instead.
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { expediteStableAtomSync, consumeExpedite } from './useStableAtomSync';
 
 describe('expedite flag', () => {
@@ -34,5 +34,22 @@ describe('expedite flag', () => {
     expediteStableAtomSync();
     expect(consumeExpedite()).toBe(true);
     expect(consumeExpedite()).toBe(false);
+  });
+});
+
+describe('expedite TTL — a no-op panel write cannot leak onto a later gesture', () => {
+  it('drops a flag older than the TTL window', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-06T12:00:00Z'));
+      expediteStableAtomSync();
+      vi.setSystemTime(new Date('2026-09-06T12:00:05Z')); // 5s later: a drag end / undo
+      expect(consumeExpedite()).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+  it('honours a fresh flag', () => {
+    expediteStableAtomSync();
+    expect(consumeExpedite()).toBe(true);
+    expect(consumeExpedite()).toBe(false); // one-shot
   });
 });

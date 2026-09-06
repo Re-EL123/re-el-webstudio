@@ -749,6 +749,7 @@ export default function AnimationTool({ styles: s, onUpdate, glideOnly }: Props)
         const existing = getTextAnimForNode(allTextAnims, nodeId);
         if (existing) {
           const view = { ...resolveTextAnimForScope(existing.config, taScope), disabled: false };
+          expediteStableAtomSync();
           queueMutation({ type: 'updateTextAnim', nodeId, config: taScope
             ? setTextAnimScoped(existing.config, view, taScope)
             : { ...existing.config, disabled: false } });
@@ -774,7 +775,7 @@ export default function AnimationTool({ styles: s, onUpdate, glideOnly }: Props)
           // Adding on a replica scopes the transform to THAT tile (no scrub off-scope) via
           // the spec; on Desktop/primary it's a base transform (the original direct path).
           if (tScope) writeScrollFx((sp) => ({ ...sp, transform: { trigger: 'onScroll', from, to, transition, scope: [tScope] } }));
-          else queueMutation({ type: 'updateScrollAnim', config: { nodeId, trigger: 'onScroll', stops: [{ progress: 0, props: from }, { progress: 1, props: to }], transition } });
+          else { expediteStableAtomSync(); queueMutation({ type: 'updateScrollAnim', config: { nodeId, trigger: 'onScroll', stops: [{ progress: 0, props: from }, { progress: 1, props: to }], transition } }); }
         }
         setActivePopup('scrollTransform'); break;
       case 'scrollSpeed':
@@ -903,8 +904,10 @@ export default function AnimationTool({ styles: s, onUpdate, glideOnly }: Props)
         const existing = getTextAnimForNode(allTextAnims, nodeId);
         if (taScope && existing) {
           const view = { ...resolveTextAnimForScope(existing.config, taScope), disabled: true };
+          expediteStableAtomSync();
           queueMutation({ type: 'updateTextAnim', nodeId, config: setTextAnimScoped(existing.config, view, taScope) });
         } else if (existing?.config.responsive?.some((r) => r.config.disabled === false)) {
+          expediteStableAtomSync();
           queueMutation({ type: 'updateTextAnim', nodeId, config: { ...existing.config, disabled: true } });
         } else {
           queueMutation({ type: 'removeTextAnim', nodeId });
@@ -925,7 +928,7 @@ export default function AnimationTool({ styles: s, onUpdate, glideOnly }: Props)
       case 'keyframe': {
         const anims = parseAnimationShorthand(s.animation || '');
         for (const anim of anims) {
-          if (anim.keyframeName) queueMutation({ type: 'removeKeyframes', name: anim.keyframeName });
+          if (anim.keyframeName) { expediteStableAtomSync(); queueMutation({ type: 'removeKeyframes', name: anim.keyframeName }); }
         }
         flushNow();
         refreshCanvasTokens();
@@ -990,6 +993,7 @@ export default function AnimationTool({ styles: s, onUpdate, glideOnly }: Props)
       const ta = getTextAnimForNode(allTextAnims, nodeId);
       if (ta) {
         trace.action('animation:reset-override', { nodeId, type: 'textEffect', scope });
+        expediteStableAtomSync();
         queueMutation({ type: 'updateTextAnim', nodeId, config: resetTextAnimScope(ta.config, scope as TextAnimScope) });
         setActivePopup(null);
         return;
@@ -1112,7 +1116,7 @@ export default function AnimationTool({ styles: s, onUpdate, glideOnly }: Props)
         return { title: 'Text',
           content: <TextEffectPopup key={nodeId} nodeId={nodeId} config={currentConfig}
             scope={getActiveAnimationScope() as TextAnimScope | null}
-            onChange={(cfg) => queueMutation({ type: 'updateTextAnim', nodeId, config: cfg })} /> };
+            onChange={(cfg) => { expediteStableAtomSync(); queueMutation({ type: 'updateTextAnim', nodeId, config: cfg }); }} /> };
       }
       case 'transition': {
         const trans = parseTransitionShorthand(s.transition || '');
@@ -1138,6 +1142,7 @@ export default function AnimationTool({ styles: s, onUpdate, glideOnly }: Props)
   }, [activePopup, node, nodeId, detected, allTextAnims, cssHoverStyles, writeInstanceFx, pageEffects, pageTargetOptions]);
 
   const handleCreateKeyframe = useCallback((kfName: string) => {
+    expediteStableAtomSync();
     queueMutation({ type: 'updateKeyframes', name: kfName, css: formatKeyframes(createDefaultKeyframeAnimation(kfName)) });
     onUpdate('animation', formatAnimationShorthand([{ ...createDefaultAnimation(), keyframeName: kfName }]));
     flushNow();

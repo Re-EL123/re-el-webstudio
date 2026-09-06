@@ -30,6 +30,7 @@ import { trace } from '@/shared/debug-trace';
 import { getI18nConfig } from '@/code/project/locale-ops';
 import { commitTranslationAttr, readTranslationText } from '@/code/project/translation-ops';
 import { getActiveFilePath } from '@/canvas/node-ops';
+import { expediteStableAtomSync } from '@/canvas/hooks/useStableAtomSync';
 
 /** Blue "overridden on this viewport/variant" label style (matches ComponentPropsTool). */
 const OVERRIDE_LABEL: React.CSSProperties = { color: 'var(--accent-text)', fontWeight: 600 };
@@ -233,6 +234,7 @@ export default function InputTool() {
     void (async () => {
       const raw = await fetchRawIconSvg(spec.icon);
       if (!raw) { trace.error('input-tool:select-icon-heal-fetch-failed', { icon: spec.icon }); return; }
+      expediteStableAtomSync();
       queueMutation({ type: 'updateSelectCaretRule', nodeId, cssBody: bakeSelectCaretCssBody(raw, spec.color ?? DEFAULT_SELECT_ICON_COLOR) });
       flushNow();
     })();
@@ -269,6 +271,7 @@ export default function InputTool() {
     if (!nodeId) return;
     // Spread the existing rule so future ::placeholder props survive a color
     // edit; '' filters out and an empty rule is removed entirely.
+    expediteStableAtomSync();
     queueMutation({ type: 'updatePseudoStyle', nodeId, pseudo: 'placeholder', styles: { ...placeholderStyles, color: v } });
     commitNow();
     trace.action('input-tool:placeholder-color', { nodeId, set: !!v });
@@ -311,6 +314,7 @@ export default function InputTool() {
     // Fill read the caret as an "Image" fill — user report 2026-08-13). The
     // inline clear migrates selects baked by the pre-rule version (no-op
     // otherwise).
+    expediteStableAtomSync();
     queueMutation({ type: 'updateSelectCaretRule', nodeId, cssBody: bakeSelectCaretCssBody(raw, c) });
     queueMutation({ type: 'updateStyles', nodeId, styles: clearSelectIconInlineStyles() });
     queueMutation({ type: 'updateHtmlAttrs', nodeId, attrs: { [SELECT_ICON_ATTR]: JSON.stringify({ icon: iconName, color: c }) } });
@@ -334,6 +338,7 @@ export default function InputTool() {
 
   const removeSelectIcon = () => {
     if (!nodeId) return;
+    expediteStableAtomSync();
     queueMutation({ type: 'updateSelectCaretRule', nodeId, cssBody: null });
     queueMutation({ type: 'updateStyles', nodeId, styles: clearSelectIconInlineStyles() });
     queueMutation({ type: 'updateHtmlAttrs', nodeId, attrs: { [SELECT_ICON_ATTR]: '' } });

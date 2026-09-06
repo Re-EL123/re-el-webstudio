@@ -291,6 +291,22 @@ describe('mergeVariantEffectiveStyles', () => {
 
 
 describe('computeFlowSiblingOrder', () => {
+  it('main-axis TIES (zero-width squeezed siblings) fall back to CSS order, then source index', () => {
+    // A row: a code component whose min-content width fills the parent squeezes
+    // both pink frames to 0px. Source order is [code, frameA, frameB]; after a
+    // right-arrow the orders are frameA=0, code=1, frameB=2 — but frameA (0px)
+    // and code share left=100. Sorting by left alone kept source order and the
+    // code component read as still first, forever (live find 2026-09-06).
+    const row = (id: string, left: number, order: number) => ({ id, rect: { left, top: 0 }, position: 'relative', order });
+    expect(computeFlowSiblingOrder([row('code', 100, 1), row('frameA', 100, 0), row('frameB', 1500, 2)], 'row'))
+      .toEqual(['frameA', 'code', 'frameB']);
+    // equal order too → source index decides (CSS placement rule)
+    expect(computeFlowSiblingOrder([row('a', 100, 0), row('b', 100, 0)], 'row')).toEqual(['a', 'b']);
+    // sub-pixel jitter is still a tie; a real gap is not
+    expect(computeFlowSiblingOrder([row('x', 100.3, 5), row('y', 100, 0)], 'row')).toEqual(['y', 'x']);
+    expect(computeFlowSiblingOrder([row('x', 100, 5), row('y', 120, 0)], 'row')).toEqual(['x', 'y']);
+  });
+
   const at = (id: string, top: number, position: string | null = 'relative') =>
     ({ id, rect: { left: 0, top }, position });
 

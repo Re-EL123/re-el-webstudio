@@ -41,13 +41,19 @@ export function StableAtomSyncHost(): null {
 // the canvas needs protecting from this one" — the next scheduled mirror runs
 // on the next tick instead. One-shot: consumed by the scheduling that follows,
 // so it can never leave the mirror permanently eager.
-let _expedite = false;
+let _expediteAt = 0;
+/** A panel write that turns out to be a NO-OP (identical code) never schedules
+ *  a mirror, so its flag would otherwise leak onto the NEXT write — possibly a
+ *  drag end or a big-page undo that needs the paint-first budget. A stale
+ *  flag is dropped after this window; a real panel write always schedules
+ *  within a few ms of the call. */
+const EXPEDITE_TTL_MS = 1000;
 
 /** Make the NEXT stable-atom mirror fire immediately instead of after the
  *  canvas-protection delay. Call from panel actions whose result the user is
  *  waiting to see in a panel (CMS bind/unbind, variable bind, prop writes). */
 export function expediteStableAtomSync(): void {
-  _expedite = true;
+  _expediteAt = Date.now();
 }
 
 /** Read-and-clear the expedite flag. One-shot by construction: a single panel
@@ -55,9 +61,9 @@ export function expediteStableAtomSync(): void {
  *  and drags the paint-first budget the delay exists to buy. Exported so the
  *  contract is testable without mounting the hook. */
 export function consumeExpedite(): boolean {
-  const v = _expedite;
-  _expedite = false;
-  return v;
+  const at = _expediteAt;
+  _expediteAt = 0;
+  return at !== 0 && Date.now() - at <= EXPEDITE_TTL_MS;
 }
 
 export function useStableAtomSync() {

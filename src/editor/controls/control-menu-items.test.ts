@@ -364,3 +364,43 @@ describe('getVariableMenuItems — hideSet suppresses the generic Set Variable (
     expect(getVariableMenuItems(ctx(), { hideCreate: true }).some(i => i.label === 'Set Variable')).toBe(true);
   });
 });
+
+// ─── Localize allowlist (2026-09-06) ─────────────────────────────────────────
+// The convert flow can only write `:lang() [data-id] { css-prop: v }`, so the
+// item shows on plain CSS rows (and text content) — never on attributes,
+// motion shorthands, feature config, compound editors or sizes.
+describe('getAllMenuItems — Localize allowlist', () => {
+  const localize = (over: Partial<MenuContext>) =>
+    getAllMenuItems(makeCtx({ nodeId: 'n1', onOpenLocalize: () => {}, ...over }))
+      .find(i => i.label === 'Localize' || i.label === 'Localize …');
+
+  it('shows on plain CSS rows and text content', () => {
+    for (const p of ['backgroundColor', 'color', 'opacity', 'gap', 'padding', 'margin', 'flexDirection', 'objectFit', 'textContent', 'display']) {
+      expect(localize({ property: p }), p).toBeDefined();
+    }
+  });
+  it('never shows on HTML attributes', () => {
+    for (const p of ['href', 'target', 'rel', 'data-smooth-scroll', 'data-keep-params', 'alt', 'aria-label', 'src', 'poster', 'autoplay', 'loop', 'muted', 'controls', 'playsInline']) {
+      expect(localize({ property: p }), p).toBeUndefined();
+    }
+  });
+  it('never shows on motion shorthands, feature config, compound editors or sizes', () => {
+    for (const p of ['x', 'y', 'scale', 'skew', 'rotateX', 'transition', 'initialVariant',
+      'collectionSource', 'collectionFilters', 'overlay-side', 'clipPath', 'mask', 'boxShadow', 'transform', 'filter',
+      'border', 'borderWidth', 'width', 'height', 'minWidth', 'maxHeight', '']) {
+      expect(localize({ property: p }), p).toBeUndefined();
+    }
+  });
+  it('hides on a component variant tile even for an allowed property', () => {
+    expect(localize({ property: 'backgroundColor', isVariantTile: true })).toBeUndefined();
+    expect(localize({ property: 'backgroundColor', isVariantTile: false })).toBeDefined();
+  });
+  it('hides in a single-locale project (nothing to localize into)', () => {
+    expect(localize({ property: 'color', hasMultipleLocales: false })).toBeUndefined();
+    expect(localize({ property: 'color', hasMultipleLocales: true })).toBeDefined();
+  });
+  it('still respects the default-locale and nodeId gates', () => {
+    expect(localize({ property: 'color', isDefaultLocale: false })).toBeUndefined();
+    expect(localize({ property: 'color', nodeId: null })).toBeUndefined();
+  });
+});

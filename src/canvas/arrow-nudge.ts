@@ -155,7 +155,7 @@ function effectiveStylesFor(node: CanvasNode, vpId: string): Record<string, stri
  * Pure over its inputs so the rule is testable without a canvas bridge.
  */
 export function computeFlowSiblingOrder(
-  children: { id: string; rect: { left: number; top: number }; position: string | null | undefined }[],
+  children: { id: string; rect: { left: number; top: number }; position: string | null | undefined; order?: number | null }[],
   flexDirection: 'row' | 'column',
 ): string[] {
   return children
@@ -163,10 +163,22 @@ export function computeFlowSiblingOrder(
     // `layout::` nodes siblings of the sections — including them here made an
     // arrow reorder renumber the template footer/nav in SECTION space (the
     // band-corruption commitOrderAssignments now also guards against).
+    .map((c, index) => ({ ...c, index }))
     .filter(c => !c.id.startsWith('layout::') && c.id !== 'children-slot')
     .filter(c => c.position !== 'absolute' && c.position !== 'fixed')
-    .slice()
-    .sort((a, b) => (flexDirection === 'row' ? a.rect.left - b.rect.left : a.rect.top - b.rect.top))
+    .sort((a, b) => {
+      const d = flexDirection === 'row' ? a.rect.left - b.rect.left : a.rect.top - b.rect.top;
+      // A ZERO-SIZE sibling ties on the main axis with the sibling that follows
+      // it (a code component whose min-content width squeezed its flex siblings
+      // to 0px, live find 2026-09-06). A geometry tie must fall back to what
+      // CSS itself uses to place them — `order`, then source index — otherwise
+      // the tie keeps INPUT (source) order, the moved node reads as still first,
+      // and every arrow press is a no-op or rewrites the same assignments.
+      if (Math.abs(d) > 0.5) return d;
+      const ao = a.order ?? 0; const bo = b.order ?? 0;
+      if (ao !== bo) return ao - bo;
+      return a.index - b.index;
+    })
     .map(c => c.id);
 }
 
@@ -319,6 +331,7 @@ function nudgeOrder(
       id: c.id,
       rect: c.rect,
       position: findNodeComputedStyle(c.id, vpId, 'position'),
+      order: parseInt(findNodeComputedStyle(c.id, vpId, 'order') || '0', 10) || 0,
     })),
     flexDir,
   );

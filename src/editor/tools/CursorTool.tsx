@@ -45,6 +45,7 @@ import { LegacyVariableBoundPill } from '../controls/VariableBoundPill';
 import { removeComponentCursorProjectWide } from '@/code/features/remove-component-cursor';
 import { trace } from '@/shared/debug-trace';
 import { AlignStartIcon, AlignCenterIcon, AlignEndIcon } from '@/shared/icons';
+import { expediteStableAtomSync } from '@/canvas/hooks/useStableAtomSync';
 
 // CURSOR_OPTIONS removed — we now show every CSS cursor in a grid picker
 // (see WebCursorRow / CursorPickerPanel below). The full list lives in
@@ -328,6 +329,10 @@ function CursorRemoveButton({
     // store is empty and other pages may still need it.
     // A cursor VARIABLE on a master root also has instances to clean up; the
     // sweep no-ops for a plain (imported-component) cursor, which has none.
+    // Panel click, nothing on the canvas to protect: expedite BEFORE the
+    // branch — the project-wide path returns early and left the pill on the
+    // 450ms mirror ("X on the cursor variable is slow", 2026-09-06).
+    expediteStableAtomSync();
     if (removeComponentCursorProjectWide(nodeId)) return;
     modifyProjectFile(activeFile, (c) => removeComponentCursorInCode(c, nodeId));
   }, [nodeId, flavor, activeFile, updateStyle]);
@@ -407,6 +412,7 @@ function PendingCursorRow({
 
   const writeCursorBinding = useCallback((propName: string, addProp: boolean) => {
     trace.action('cursor-tool:bind-pending-cursor', { nodeId, propName, addProp });
+    expediteStableAtomSync();
     modifyProjectFile(activeFile, (c) => {
       // Default the cursor prop to `() => null` so the master previews (and
       // any page instance that hasn't picked a component yet) render NO
@@ -647,6 +653,7 @@ function ComponentCursorRow({
     // `cursor=`/`cursorOpts=` are stripped from every instance. Without this the instances keep
     // pointing at a parameter the master no longer declares. Falls back to the plain local unbind
     // when this isn't a component master (or another node still binds the same prop).
+    expediteStableAtomSync();
     if (removeComponentCursorProjectWide(nodeId)) return;
     modifyProjectFile(activeFile, (c) => removeComponentCursorInCode(c, nodeId));
   }, [nodeId, activeFile, cursor.componentName]);
@@ -731,6 +738,7 @@ function ComponentCursorRow({
           }}
           onWrite={(opts) => {
             trace.action('cursor-tool:update', { nodeId, componentName: opts.componentName, mode: opts.mode });
+            expediteStableAtomSync();
             modifyProjectFile(activeFile, (c) => updateComponentCursorInCode(c, nodeId, opts));
             // modifyProjectFile bumps projectVersion automatically; nothing to do here.
           }}
@@ -799,6 +807,7 @@ function ComponentCursorPicker({
             trace.action('cursor-tool:add-component', {
               nodeId, componentName: opts.componentName, mode: opts.mode,
             });
+            expediteStableAtomSync();
             modifyProjectFile(activeFile, (c) =>
               addComponentCursorInCode(c, nodeId, {
                 ...opts,

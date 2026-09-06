@@ -37,6 +37,12 @@ export interface MenuContext {
   isDefaultLocale: boolean;
   activeLocale: string;
   hasLocaleOverride: boolean;
+  /** Selected tile is a non-default component VARIANT — Localize would write
+   *  against the element (every variant), so the item is hidden. */
+  isVariantTile?: boolean;
+  /** Project declares more than one locale. With a single locale there is
+   *  nothing to localize INTO — the item is hidden (user rule 2026-09-06). */
+  hasMultipleLocales?: boolean;
   // Preset context
   presetTokens?: PresetToken[];
   hasPreset?: boolean;
@@ -416,22 +422,52 @@ export function getOverrideMenuItems(ctx: MenuContext, hideResetStyle?: boolean)
 
 // ─── Locale Items ───────────────────────────────────────────────────────────
 
+/** CSS properties (plus `textContent`) on which the "Localize" convert flow is
+ *  meaningful. Anything not listed never shows the item. Typography rows
+ *  (fontSize / letterSpacing / lineHeight / fontFamily / textAlign) are listed
+ *  but the Text section's LocalizeGate still hides them — lift that gate per
+ *  row to enable them. */
+export const LOCALIZABLE_PROPERTIES: ReadonlySet<string> = new Set([
+  // Styles
+  'backgroundColor', 'backgroundImage', 'backgroundSize', 'backgroundPosition',
+  'backgroundRepeat', 'backgroundAttachment', 'backgroundBlendMode',
+  'color', 'opacity', 'borderRadius', 'overflow', 'cursor', 'display', 'visibility',
+  // Layout (RTL / word-length use case)
+  'flexDirection', 'flexWrap', 'alignItems', 'justifyContent', 'gap', 'rowGap', 'columnGap',
+  'padding', 'margin',
+  // Position insets
+  'left', 'top', 'right', 'bottom',
+  // Media boxes
+  'objectFit', 'objectPosition', 'scrollMarginTop',
+  // Text content → messages/<locale>.json (the translation path, not CSS)
+  'textContent',
+  // Typography (currently behind the Text section gate)
+  'fontSize', 'letterSpacing', 'lineHeight', 'fontFamily', 'textAlign',
+]);
+
 function getLocaleMenuItems(ctx: MenuContext): MenuItem[] {
   const items: MenuItem[] = [];
 
   // "Localize" — the Phase 4 convert flow (default mode only): opens the
   // When-<locale>-set-<value> popup that writes `:lang()` overrides.
-  // Real element style properties only (nodeId present). COMPOUND properties
-  // (border/shadow/transform) are excluded — their multi-part editors don't
-  // map onto the single-value convert popup.
-  const NON_LOCALIZABLE = new Set([
-    'border', 'borderWidth', 'borderStyle', 'borderColor', 'boxShadow', 'textShadow',
-    'transform', 'filter', 'backdropFilter',
-    // Sizes are responsive via the normal per-viewport overrides — per-locale
-    // dimensions were judged too confusing (user 2026-07-22).
-    'width', 'height', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight',
-  ]);
-  if (ctx.isDefaultLocale && ctx.onOpenLocalize && ctx.nodeId && !NON_LOCALIZABLE.has(ctx.property)) {
+  //
+  // ALLOWLIST, not blocklist (2026-09-06). The flow can only ever write a CSS
+  // declaration against the element (`:lang(fr) [data-id] { prop: v }`), so it
+  // is meaningful on plain, single-value CSS properties of the element's own
+  // inline style — nothing else. The old blocklist let it through on HTML
+  // attributes (`href`, `alt`, `src` …→ a bogus CSS rule), motion shorthands
+  // (`x`, `scale`, `transition` → not CSS at all), feature config
+  // (collection list, component cursor) and compound editors (clipPath,
+  // mask, per-side padding) whose value the single-input popup cannot
+  // represent. Sizes stay out by product decision (2026-07-22). Text content
+  // is the one non-CSS entry: it routes to messages/<locale>.json.
+  // See docs/LOCALIZE-MENU-AUDIT-2026-09-06.md for the row-by-row analysis.
+  // A component VARIANT tile: the rule is written against the element, so it
+  // would apply to every variant, not the one on screen — hide until the
+  // flow can target the variant entry.
+  // Single-locale project: nothing to localize into.
+  if (ctx.hasMultipleLocales === false) return items;
+  if (ctx.isDefaultLocale && ctx.onOpenLocalize && ctx.nodeId && !ctx.isVariantTile && LOCALIZABLE_PROPERTIES.has(ctx.property)) {
     items.push({
       label: ctx.hasLocaleOverride ? 'Localize …' : 'Localize',
       show: true,

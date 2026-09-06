@@ -27,6 +27,7 @@ import { injectCanvasCSS, removeCanvasCSS } from '@/canvas/node-ops';
 import { presetTokensAtom } from '@/code/stores/preset-store';
 import { trace } from '@/shared/debug-trace';
 import { resolvePresetColor } from '@/shared/css-utils';
+import { expediteStableAtomSync } from '@/canvas/hooks/useStableAtomSync';
 
 const BORDER_STYLE_OPTIONS = [
   { value: 'none',   label: 'None'   },
@@ -143,6 +144,7 @@ function BorderEditorPanel({ styles: s, nodeId, onChangeMultiple, onChangeMultip
     const effectiveMode = isScrollMode ? 'inline' : writeMode;
     if (effectiveMode === 'overlay') {
       const afterCSS = formatBorderAfterCSS(state);
+      expediteStableAtomSync();
       queueMutation({ type: 'updateBorderOverlay', nodeId, afterCSS });
       const clear: Record<string, string> = {};
       for (const key of BORDER_INLINE_KEYS) clear[key] = '';
@@ -152,6 +154,7 @@ function BorderEditorPanel({ styles: s, nodeId, onChangeMultiple, onChangeMultip
       trace.action('border-panel:write-overlay', { nodeId, width: state.top.width });
     } else {
       if (isOverlayFromCode || renderMode === 'overlay') {
+        expediteStableAtomSync();
         queueMutation({ type: 'removeBorderOverlay', nodeId });
         removeCanvasCSS(`[data-id="${nodeId}"]::after`);
       }
@@ -181,6 +184,7 @@ function BorderEditorPanel({ styles: s, nodeId, onChangeMultiple, onChangeMultip
     const effectiveRenderMode = isScrollMode ? 'inline' : renderMode;
     if (effectiveRenderMode === 'overlay') {
       const afterCSS = formatGradientBorderAfterCSS(gradientCSS, width);
+      expediteStableAtomSync();
       queueMutation({ type: 'updateBorderOverlay', nodeId, afterCSS });
       injectCanvasCSS(`[data-id="${nodeId}"]::after`, afterCSS);
       const clear: Record<string, string> = {};
@@ -189,6 +193,7 @@ function BorderEditorPanel({ styles: s, nodeId, onChangeMultiple, onChangeMultip
       onChangeMultiple(clear);
     } else {
       if (isOverlayFromCode) {
+        expediteStableAtomSync();
         queueMutation({ type: 'removeBorderOverlay', nodeId });
         removeCanvasCSS(`[data-id="${nodeId}"]::after`);
       }
@@ -279,7 +284,7 @@ function BorderEditorPanel({ styles: s, nodeId, onChangeMultiple, onChangeMultip
   const switchToIndividual = () => { setShowIndividual(true); writeBorder({ ...borderState, isUniform: false }, renderMode); };
 
   const switchRenderMode = (newMode: 'inline' | 'overlay') => {
-    if (renderMode === 'overlay') { queueMutation({ type: 'removeBorderOverlay', nodeId }); removeCanvasCSS(`[data-id="${nodeId}"]::after`); }
+    if (renderMode === 'overlay') { expediteStableAtomSync(); queueMutation({ type: 'removeBorderOverlay', nodeId }); removeCanvasCSS(`[data-id="${nodeId}"]::after`); }
     if (renderMode === 'inline') {
       const clear: Record<string, string> = {};
       for (const key of BORDER_INLINE_KEYS) clear[key] = '';
@@ -291,6 +296,7 @@ function BorderEditorPanel({ styles: s, nodeId, onChangeMultiple, onChangeMultip
       const gCSS = gradientFormatGradient(activeGradient);
       if (newMode === 'overlay') {
         const afterCSS = formatGradientBorderAfterCSS(gCSS, gradientWidth);
+        expediteStableAtomSync();
         queueMutation({ type: 'updateBorderOverlay', nodeId, afterCSS });
         injectCanvasCSS(`[data-id="${nodeId}"]::after`, afterCSS);
         if (!s.position || s.position === 'static') onChangeMultiple({ position: 'relative' });
@@ -300,6 +306,7 @@ function BorderEditorPanel({ styles: s, nodeId, onChangeMultiple, onChangeMultip
     } else {
       if (newMode === 'overlay') {
         const afterCSS = formatBorderAfterCSS(borderState);
+        expediteStableAtomSync();
         queueMutation({ type: 'updateBorderOverlay', nodeId, afterCSS });
         injectCanvasCSS(`[data-id="${nodeId}"]::after`, afterCSS);
         if (!s.position || s.position === 'static') onChangeMultiple({ position: 'relative' });
@@ -312,7 +319,7 @@ function BorderEditorPanel({ styles: s, nodeId, onChangeMultiple, onChangeMultip
 
   const switchBorderType = (newType: 'solid' | 'gradient') => {
     if (borderType === 'gradient') onChangeMultiple({ borderImageSource: '', borderImageSlice: '' });
-    if (borderType === 'solid' && renderMode === 'overlay') { queueMutation({ type: 'removeBorderOverlay', nodeId }); removeCanvasCSS(`[data-id="${nodeId}"]::after`); }
+    if (borderType === 'solid' && renderMode === 'overlay') { expediteStableAtomSync(); queueMutation({ type: 'removeBorderOverlay', nodeId }); removeCanvasCSS(`[data-id="${nodeId}"]::after`); }
     setBorderType(newType);
     if (newType === 'gradient') {
       const width = borderState.top.width || gradientWidth || 1;
@@ -553,6 +560,7 @@ function BorderAtom() {
     const effectiveMode = isScrollMode ? 'inline' : writeMode;
     if (effectiveMode === 'overlay') {
       const afterCSS = formatBorderAfterCSS(state);
+      expediteStableAtomSync();
       queueMutation({ type: 'updateBorderOverlay', nodeId, afterCSS });
       const clear: Record<string, string> = {};
       for (const key of BORDER_INLINE_KEYS) clear[key] = '';
@@ -563,6 +571,7 @@ function BorderAtom() {
       trace.action('border:write-overlay', { nodeId, width: state.top.width });
     } else {
       if (isOverlayFromCode || renderMode === 'overlay') {
+        expediteStableAtomSync();
         queueMutation({ type: 'removeBorderOverlay', nodeId });
         removeCanvasCSS(`[data-id="${nodeId}"]::after`);
       }
@@ -590,6 +599,7 @@ function BorderAtom() {
     const clear: Record<string, string> = {};
     for (const key of BORDER_INLINE_KEYS) clear[key] = '';
     onChangeMultiple(clear);
+    expediteStableAtomSync();
     queueMutation({ type: 'removeBorderOverlay', nodeId });
     removeCanvasCSS(`[data-id="${nodeId}"]::after`);
     setLocalState(null);

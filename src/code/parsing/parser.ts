@@ -765,6 +765,10 @@ function parseVisibilityCondition(
       // Negative chain — every node should be a `!==` (or another &&).
       const left = parseVisibilityCondition(expr.left, allVariants);
       const right = parseVisibilityCondition(expr.right, allVariants);
+      // `{overlayXOpen && variant !== 'default' && …}`: a FOREIGN gate on the
+      // left (the overlay's open-state, kept verbatim by the generator) with
+      // the variant test on the right — the hidden set is the right side.
+      if (!left && right && expr.left?.type !== 'BooleanLiteral') return right;
       if (!left || !right) return null;
       return new Set([...left, ...right]);
     }

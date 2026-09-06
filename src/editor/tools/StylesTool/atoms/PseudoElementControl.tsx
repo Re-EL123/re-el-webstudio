@@ -32,6 +32,7 @@ import { ShadowControl as TextShadowControl } from '../../TextStyleTool/atoms/Sh
 import { getPropertyIcon, PseudoIcon } from '@/design-system/PropertyIcons';
 import type { AtomProps } from '../../../controls/unified/types';
 import type { ComponentType } from 'react';
+import { expediteStableAtomSync } from '@/canvas/hooks/useStableAtomSync';
 
 // ─── ToolAtom properties (reuse centralized controls) ──────────────────────
 
@@ -391,6 +392,7 @@ function PseudoEditor({ nodeId, pseudo, styles }: {
   const doWrite = useCallback((s: Record<string, string>) => {
     const filtered: Record<string, string> = {};
     for (const [k, v] of Object.entries(s)) { if (v) filtered[k] = v; }
+    expediteStableAtomSync();
     queueMutation({ type: 'updatePseudoStyle', nodeId, pseudo, styles: filtered });
     trace.action('pseudo-editor:write', { nodeId, pseudo, propCount: Object.keys(filtered).length });
   }, [nodeId, pseudo]);
@@ -563,12 +565,14 @@ function PseudoEntryRow({ nodeId, pseudo, styles, pushPanel }: {
       inset: '0',
       pointerEvents: 'none',
     };
+    expediteStableAtomSync();
     queueMutation({ type: 'updatePseudoStyle', nodeId, pseudo, styles: defaults });
     trace.action('pseudo-entry:add', { nodeId, pseudo });
   };
 
   const handleRemove = (e: React.MouseEvent) => {
     e.stopPropagation();
+    expediteStableAtomSync();
     queueMutation({ type: 'removePseudo', nodeId, pseudo });
     removeCanvasCSS(`[data-id="${nodeId}"]::${pseudo}`);
     trace.action('pseudo-entry:remove', { nodeId, pseudo });

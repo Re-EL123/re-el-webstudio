@@ -2623,3 +2623,28 @@ describe('pruneOverlayDuplicatesInCode — orphan in the no-paren form', () => {
     expect(pruneOverlayDuplicatesInCode(once)).toBe(once);
   });
 });
+
+// A per-variant hide rewrites the overlay condition to `{var && variant !== 'x' && (`
+// (or, in files written before the gate fix, `{variant !== 'x' && (`). Removal
+// must still take the WHOLE conditional — bailing left `{variant !== "default" && }`
+// behind → `Unexpected token` and the X did nothing (2026-09-06).
+describe('removeOverlay — compound / rewritten condition', () => {
+  test('removes `{var && variant !== "default" && (…)}` cleanly', () => {
+    const code = createOverlayInCode(BASE_CODE, 'card1', 'dropdown1', makeOverlayConfig(), makeTriggerConfig())
+      .replace(/\{(\w+Open) && \(/, "{$1 && variant !== 'default' && (");
+    expect(code).toContain("variant !== 'default' && (");
+    const removed = removeOverlayInCode(code, 'dropdown1', 'card1');
+    expectParses(removed);
+    expect(removed).not.toContain('AnimatePresence');
+    expect(removed).not.toContain('dropdown1');
+    expect(removed).not.toContain("variant !== 'default'");
+  });
+  test('removes a pre-fix `{variant !== "default" && (…)}` (gate already lost)', () => {
+    const code = createOverlayInCode(BASE_CODE, 'card1', 'dropdown1', makeOverlayConfig(), makeTriggerConfig())
+      .replace(/\{\w+Open && \(/, "{variant !== 'default' && (");
+    const removed = removeOverlayInCode(code, 'dropdown1', 'card1');
+    expectParses(removed);
+    expect(removed).not.toContain('AnimatePresence');
+    expect(removed).not.toContain("variant !== 'default'");
+  });
+});

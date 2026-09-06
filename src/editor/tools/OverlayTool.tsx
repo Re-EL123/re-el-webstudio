@@ -12,6 +12,7 @@ import { useControl } from '../controls/ControlProvider';
 import { overlayCallsAtom, overlayTriggerCallsAtom, overlayEditingIdAtom } from '@/code/stores/overlay-store';
 import { getOverlayForNode, getTriggerForNode, resolveOverlayConfig, parseOverlayTriggerCalls, type OverlayCall, type OverlayTriggerCall } from '@/code/parsing/overlay-parser';
 import { queueMutation, flushNow, getCurrentCode } from '@/code/mutation/mutation-queue';
+import { expediteStableAtomSync } from '@/canvas/hooks/useStableAtomSync';
 import { stateVarName } from '@/code/generation/overlay-gen';
 import { selectedIdsAtom, nodesAtom, isComponentFileAtom, isLayoutFileAtom } from '@/code/stores/store';
 import { useNodesComputed } from '@/code/stores/node-family';
@@ -255,6 +256,10 @@ function TriggerOverlayRow({ nodeId, triggerInfo, allOverlays, setEditingOverlay
   const label = triggerInfo.config.trigger === 'hover' ? 'Hover' : 'Click';
 
   const handleRemove = useCallback(() => {
+    // The Overlays row reads the STABLE code mirror (450ms canvas-protection
+    // lag). This is a panel click with nothing to protect on the canvas —
+    // expedite so the row disappears with the layers, not ~1s later.
+    expediteStableAtomSync();
     queueMutation({ type: 'removeOverlay', overlayId, triggerId: nodeId });
     trace.action('overlay-tool:remove', { nodeId, overlayId });
   }, [nodeId, overlayId]);
@@ -346,6 +351,7 @@ function ShowOnControls({ overlayId, overlayConfig, allTriggers }: {
     const config = v.startsWith('event:')
       ? { ...triggerInfo.config, trigger: 'event' as const, eventName: v.slice(6) }
       : { ...triggerInfo.config, trigger: v as 'click' | 'hover', eventName: undefined };
+    expediteStableAtomSync();
     queueMutation({ type: 'updateOverlayTrigger', triggerId: overlayConfig.triggerId, config });
     trace.action('overlay-tool:update-interaction', { overlayId, trigger: v });
   }, [triggerInfo, overlayConfig.triggerId, overlayId]);
@@ -402,12 +408,14 @@ function OnOpenVariantRow({ overlayId, instanceNodeId }: { overlayId: string; in
 
   const breakpoints = Object.values(vpWidths);
   const update = useCallback((v: string) => {
+    expediteStableAtomSync();
     queueMutation({ type: 'updateOverlayConfig', overlayId, patch: { onOpenVariant: v },
       vpWidth: variantKey ? null : (isPrimary ? null : vpWidth), breakpoints, variant: variantKey });
     flushNow();
     trace.action('overlay-tool:update-on-open-variant', { overlayId, variant: v, vpWidth: isPrimary ? null : vpWidth, variantKey });
   }, [overlayId, isPrimary, vpWidth, variantKey, breakpoints]);
   const reset = useCallback(() => {
+    expediteStableAtomSync();
     queueMutation({ type: 'updateOverlayConfig', overlayId, patch: {},
       vpWidth: variantKey ? null : vpWidth, resetKeys: ['onOpenVariant'], breakpoints, variant: variantKey });
     flushNow();
@@ -528,6 +536,7 @@ function OverlayAddButton({ nodeId, onCreated }: { nodeId: string; onCreated?: (
       trigger: 'click',
       dismiss: 'outside',
     };
+    expediteStableAtomSync();
     queueMutation({ type: 'createOverlay', triggerId: nodeId, overlayId, overlayConfig, triggerConfig, canvasNode: isCanvasRooted });
     // Flush SYNCHRONOUSLY so the overlay node exists in the parse/atom THIS tick —
     // the caller can then select it in the same React batch (no staggered
@@ -597,6 +606,7 @@ function OverlayAppearRows({ overlayId, overlayConfig }: { overlayId: string; ov
   const exitRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState<null | 'enter' | 'exit'>(null);
   const write = useCallback((patch: Partial<OverlayConfig>) => {
+    expediteStableAtomSync();
     queueMutation({ type: 'updateOverlayConfig', overlayId, patch, vpWidth: null });
     flushNow();
     trace.action('overlay-tool:update-transition', { overlayId, keys: Object.keys(patch) });
@@ -698,12 +708,14 @@ function OverlayControls({ nodeId, overlayConfig, allTriggers }: {
 
   const breakpoints = Object.values(vpWidths);
   const updatePosition = useCallback((patch: OverlayConfigOverride) => {
+    expediteStableAtomSync();
     queueMutation({ type: 'updateOverlayConfig', overlayId: nodeId, patch,
       vpWidth: variantKey ? null : (isPrimary ? null : vpWidth), breakpoints, variant: variantKey });
     trace.action('overlay-tool:update-config', { nodeId, vpWidth: isPrimary ? null : vpWidth, variant: variantKey, ...patch });
   }, [nodeId, isPrimary, vpWidth, breakpoints, variantKey]);
 
   const resetOverride = useCallback((keys: (keyof OverlayConfigOverride)[]) => {
+    expediteStableAtomSync();
     queueMutation({ type: 'updateOverlayConfig', overlayId: nodeId, patch: {},
       vpWidth: variantKey ? null : vpWidth, resetKeys: keys, breakpoints, variant: variantKey });
     trace.action('overlay-tool:reset-override', { nodeId, vpWidth, variant: variantKey, keys });
@@ -717,11 +729,13 @@ function OverlayControls({ nodeId, overlayConfig, allTriggers }: {
   // Modal-level fields (fill/dismissible/zIndex/pageScroll) are NOT per-viewport —
   // always written to the BASE config (vpWidth null, no variant).
   const updateBase = useCallback((patch: Partial<OverlayConfig>) => {
+    expediteStableAtomSync();
     queueMutation({ type: 'updateOverlayConfig', overlayId: nodeId, patch, vpWidth: null, breakpoints });
     flushNow();
     trace.action('overlay-tool:update-base', { nodeId, ...patch });
   }, [nodeId, breakpoints]);
   const resetBase = useCallback((keys: ('fill' | 'dismissible' | 'zIndex' | 'pageScroll')[]) => {
+    expediteStableAtomSync();
     queueMutation({ type: 'updateOverlayConfig', overlayId: nodeId, patch: {}, vpWidth: null, resetKeys: keys, breakpoints });
     flushNow();
     trace.action('overlay-tool:reset-base', { nodeId, keys });

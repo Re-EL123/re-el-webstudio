@@ -53,6 +53,7 @@ import { UnifiedControlProvider } from '../controls/unified';
 import { ToolInput, ToolSlider, ToolSelect, ToolSegmentedControl, ControlActionRow, RemoveButton } from '../controls';
 import { pageVariablesAtom } from '@/code/stores/page-variables-store';
 import { trace } from '@/shared/debug-trace';
+import { expediteStableAtomSync } from '@/canvas/hooks/useStableAtomSync';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -174,6 +175,7 @@ function OptionDefaultEditor({ varName, value, onChange, options }: {
 
   const commit = (next: string[]) => {
     setOpts(next);
+    expediteStableAtomSync();
     queueMutation({ type: 'setComponentPropOptions', propName: varName, options: next.map(o => o.trim()).filter(Boolean) });
     trace.action('variable-modal:option-edit', { varName, count: next.filter(Boolean).length });
   };
@@ -265,6 +267,7 @@ function NumberMetaConfig({ varName, componentCode }: { varName: string; compone
     <NumberMetaFields
       meta={getPropNumberMeta(componentCode, varName)}
       patch={(m) => {
+        expediteStableAtomSync();
         queueMutation({ type: 'setComponentPropNumberMeta', propName: varName, meta: m });
         trace.action('variable-modal:number-meta', { varName, ...m });
       }}
@@ -602,11 +605,13 @@ export default function VariableModal({
     if (!target || target === currentDisplay) { setNameDraft(currentDisplay); return; }
     if (isComponent) {
       trace.action('variable-modal:set-label', { name: selectedVar, label: target });
+      expediteStableAtomSync();
       queueMutation({ type: 'setComponentPropLabel', propName: selectedVar, label: target });
       setNameDraft(target);
     } else {
       if (!CAMEL_CASE_RE.test(target) || existingVars.some(v => v.name === target)) { setNameDraft(currentDisplay); return; }
       trace.action('variable-modal:rename', { from: selectedVar, to: target });
+      expediteStableAtomSync();
       queueMutation({ type: 'updatePageVariable', oldName: selectedVar, updates: { name: target } });
       setSelectedVar(target);
       setNameDraft(target);
@@ -628,7 +633,9 @@ export default function VariableModal({
     let label = type.label;
     for (let i = 2; takenLabels.has(label); i++) label = `${type.label} ${i}`;
     trace.action('variable-modal:create-typed', { name, type: type.id, label });
+    expediteStableAtomSync();
     queueMutation({ type: 'createTypedVariable', name, varType: type.id, literalKind: type.literalKind, defaultValue: type.defaultValue });
+    expediteStableAtomSync();
     queueMutation({ type: 'setComponentPropLabel', propName: name, label });
     flushNow(); // make the variable exist immediately so its editor renders without a staggered pop-in
     setSelectedVar(name);
@@ -708,6 +715,7 @@ export default function VariableModal({
     if (using.length > 0) { setSelectedNames(new Set()); setSelectedVar(null); setMode('list'); setRemoveWarning({ vars: [name], nodes: using }); return; }
     const v = existingVars.find(p => p.name === name);
     if (isComponent) {
+      expediteStableAtomSync();
       queueMutation({ type: 'deleteComponentVariable', propName: name, defaultValue: v?.defaultValue ?? '' });
       // Erase the HOIST TRAIL too: instances passing `name={pageVar}`, the now-orphaned
       // page/template variable in each instancing file, and a template's __templateProps
@@ -715,6 +723,7 @@ export default function VariableModal({
       // that no longer exists (deleted header var survived in the Body template, 2026-07-27).
       cascadeDeleteVariableUp(activeFile, name);
     } else {
+      expediteStableAtomSync();
       queueMutation({ type: 'removePageVariable', name });
     }
     if (selectedVar === name) { setSelectedVar(null); setPendingTypeId(null); setMode('list'); }
@@ -731,9 +740,11 @@ export default function VariableModal({
     for (const name of names) {
       const v = existingVars.find(p => p.name === name);
       if (isComponent) {
+        expediteStableAtomSync();
         queueMutation({ type: 'deleteComponentVariable', propName: name, defaultValue: v?.defaultValue ?? '' });
         cascadeDeleteVariableUp(activeFile, name); // same hoist-trail erase as the single delete
       } else {
+        expediteStableAtomSync();
         queueMutation({ type: 'removePageVariable', name });
       }
       if (selectedVar === name) { setSelectedVar(null); setPendingTypeId(null); setMode('list'); }
@@ -774,19 +785,21 @@ export default function VariableModal({
     for (let i = 1; taken.has(newName); i++) newName = `${name}Copy${i}`;
     if (isComponent) {
       const td = getVariableType(v.varType);
+      expediteStableAtomSync();
       queueMutation({ type: 'createTypedVariable', name: newName, varType: v.varType ?? '', literalKind: td?.literalKind ?? 'string', defaultValue: v.defaultValue ?? '' });
       // Carry over the rest of the @propMeta so the copy is a true duplicate.
       const origLabel = v.label || getPropLabel(componentCode, name) || name;
+      expediteStableAtomSync();
       queueMutation({ type: 'setComponentPropLabel', propName: newName, label: `${origLabel} Copy` });
       const desc = getPropDescription(componentCode, name);
-      if (desc) queueMutation({ type: 'setComponentPropDescription', propName: newName, description: desc });
+      if (desc) { expediteStableAtomSync(); queueMutation({ type: 'setComponentPropDescription', propName: newName, description: desc }); }
       const opts = getPropOptions(componentCode, name);
-      if (opts.length) queueMutation({ type: 'setComponentPropOptions', propName: newName, options: opts });
+      if (opts.length) { expediteStableAtomSync(); queueMutation({ type: 'setComponentPropOptions', propName: newName, options: opts }); }
       const numMeta = getPropNumberMeta(componentCode, name);
-      if (Object.keys(numMeta).length) queueMutation({ type: 'setComponentPropNumberMeta', propName: newName, meta: numMeta });
+      if (Object.keys(numMeta).length) { expediteStableAtomSync(); queueMutation({ type: 'setComponentPropNumberMeta', propName: newName, meta: numMeta }); }
     } else {
       const pv = pageVariables.find(p => p.name === name);
-      if (pv) queueMutation({ type: 'addPageVariable', variable: { ...pv, name: newName } });
+      if (pv) { expediteStableAtomSync(); queueMutation({ type: 'addPageVariable', variable: { ...pv, name: newName } }); }
     }
     trace.action('variable-modal:duplicate-var', { name, newName });
   }, [existingVars, isComponent, pageVariables, componentCode]);
@@ -795,8 +808,10 @@ export default function VariableModal({
   // update the @pageVariables entry. Committed on blur (not per keystroke) to avoid a mutation storm.
   const persistDescription = useCallback((varName: string, desc: string) => {
     if (isComponent) {
+      expediteStableAtomSync();
       queueMutation({ type: 'setComponentPropDescription', propName: varName, description: desc });
     } else {
+      expediteStableAtomSync();
       queueMutation({ type: 'updatePageVariable', oldName: varName, updates: { description: desc } });
     }
     trace.action('variable-modal:set-description', { varName, hasDesc: !!desc.trim() });
@@ -809,6 +824,7 @@ export default function VariableModal({
     setDefaultValue(v);
     if (!selectedVar) return;
     if (isComponent) {
+      expediteStableAtomSync();
       queueMutation({ type: 'setComponentPropDefault', propName: selectedVar, newDefault: v, literalKind: activeTypeDef?.literalKind });
       // A TEMPLATE/layout carries each variable as BOTH a function param (the runtime value) AND a
       // @pageVariables entry (the modal's list). setComponentPropDefault only touches the param, so the
@@ -816,9 +832,11 @@ export default function VariableModal({
       // @pageVariables default (it's folded into propOverrides), rendering the wrong variant. Keep them in
       // sync. No-op for a PURE component (the var isn't in @pageVariables).
       if (pageVariables.some((p) => p.name === selectedVar)) {
+        expediteStableAtomSync();
         queueMutation({ type: 'updatePageVariable', oldName: selectedVar, updates: { default: v } });
       }
     } else {
+      expediteStableAtomSync();
       queueMutation({ type: 'updatePageVariable', oldName: selectedVar, updates: { default: v } });
     }
     // Modal-initiated change: unlike a canvas drag, no `patchStyles` was sent to the iframe, so the

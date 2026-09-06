@@ -17,6 +17,7 @@ import TransitionPanel from '../TransitionPanel';
 import { TransitionCurveIcon, summarizeTransition } from '../CurvePreview';
 
 import MotionPropsEditor from './MotionPropsEditor';
+import { expediteStableAtomSync } from '@/canvas/hooks/useStableAtomSync';
 
 /** Parse a raw `useSpring` config object string from the source into the
  *  flat-string-map transition shape the Transition panel uses. Supports
@@ -271,6 +272,7 @@ function StopEditor({ stopsRef, stopIndex, nodeId, triggerRef, transitionRef, se
       layerRangeRef.current,
       layerExitRef.current,
     );
+    expediteStableAtomSync();
     queueMutation({ type: 'updateScrollAnim', config });
   }, [stopsRef, stopIndex, nodeId, triggerRef, transitionRef, sectionIdRef, sectionViewportRef, layerRangeRef, layerExitRef, directionRef, replayRef, mode, scopedWrite, directionScope, scopedDirectionWrite]);
 
@@ -505,6 +507,7 @@ export function ScrollTransformEditor({ nodeId, scrollData, onSwitchToAppear, mo
       sectionMilestones: config.sections?.length || 0,
       transitionType: trans.type, direction: config.direction, replay: config.replay,
     });
+    expediteStableAtomSync();
     queueMutation({ type: 'updateScrollAnim', config });
   }, [nodeId, mode, scopedDirectionWrite, scrollData]);
 
@@ -566,7 +569,7 @@ export function ScrollTransformEditor({ nodeId, scrollData, onSwitchToAppear, mo
             // would wrongly remove a SEPARATE effect — e.g. removeScrollDirection here
             // nukes the node's stacked Animation (Scrolled/AnimOpacity). Gate on mode.
             if (mode === 'animation') {
-              if (newTrigger === 'layerInView') queueMutation({ type: 'removeScrollAnim', nodeId });
+              if (newTrigger === 'layerInView') { expediteStableAtomSync(); queueMutation({ type: 'removeScrollAnim', nodeId }); }
               else if (newTrigger === 'sectionInView') queueMutation({ type: 'removeScrollDirection', nodeId });
             }
             // Fresh switch to Section in View: default the target to the

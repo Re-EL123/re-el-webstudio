@@ -42,6 +42,7 @@ import type { MenuItem } from '../controls/control-menu-items';
 import ImagePickerInput from '../controls/ImagePickerInput';
 import ToolPopup from '../ui/ToolPopup';
 import { trace } from '@/shared/debug-trace';
+import { expediteStableAtomSync } from '@/canvas/hooks/useStableAtomSync';
 
 const TRIGGER_OPTIONS = [
   { value: 'click', label: 'Click' },
@@ -152,6 +153,7 @@ function ComponentInstanceEventInteractions({ selectedId, componentFile }: { sel
   const bindClose = useCallback((propName: string) => {
     if (!enclosingOverlay) return;
     trace.action('interactions-tool:instance-event-close-overlay', { selectedId, propName, overlayId: enclosingOverlay });
+    expediteStableAtomSync();
     queueMutation({ type: 'bindInstanceEventCloseOverlay', nodeId: selectedId, propName, overlayId: enclosingOverlay });
     flushNow();
     forceCanvasRender();
@@ -451,6 +453,7 @@ function ComponentInteractions({ selectedId, isRoot }: { selectedId: string; isR
     const taken = new Set(allProps.map(p => p.name));
     let n = 1; let name = `event${n}`;
     while (taken.has(name)) name = `event${++n}`;
+    expediteStableAtomSync();
     queueMutation({ type: 'createTypedVariable', name, varType: 'event', literalKind: 'string', defaultValue: '' });
     queueMutation({ type: 'setChildEventFire', childId: selectedId, trigger, eventVar: name, variantName: currentVariant });
     flushNow();
@@ -782,24 +785,29 @@ function PageVarInteractions({ selectedId }: { selectedId: string }) {
   const handleAddClose = useCallback(() => {
     if (!enclosingOverlay) return;
     trace.action('interactions-tool:close-overlay-add', { nodeId: selectedId, overlayId: enclosingOverlay });
+    expediteStableAtomSync();
     queueMutation({ type: 'addCloseOverlay', nodeId: selectedId, trigger: 'click', overlayId: enclosingOverlay });
   }, [selectedId, enclosingOverlay]);
 
   const handleRemoveClose = useCallback((trigger: InteractionTrigger, overlayId: string) => {
     trace.action('interactions-tool:close-overlay-remove', { nodeId: selectedId, trigger, overlayId });
+    expediteStableAtomSync();
     queueMutation({ type: 'removeCloseOverlay', nodeId: selectedId, trigger, overlayId });
     setEditCloseKey(null);
   }, [selectedId]);
 
   const handleCloseDelay = useCallback((trigger: InteractionTrigger, overlayId: string, delay: number) => {
+    expediteStableAtomSync();
     queueMutation({ type: 'setCloseOverlayDelay', nodeId: selectedId, trigger, overlayId, delay });
   }, [selectedId]);
 
   const handleCloseTrigger = useCallback((oldTrigger: InteractionTrigger, newTrigger: InteractionTrigger, overlayId: string, delay: number) => {
     if (oldTrigger === newTrigger) return;
+    expediteStableAtomSync();
     queueMutation({ type: 'removeCloseOverlay', nodeId: selectedId, trigger: oldTrigger, overlayId });
+    expediteStableAtomSync();
     queueMutation({ type: 'addCloseOverlay', nodeId: selectedId, trigger: newTrigger, overlayId });
-    if (delay > 0) queueMutation({ type: 'setCloseOverlayDelay', nodeId: selectedId, trigger: newTrigger, overlayId, delay });
+    if (delay > 0) { expediteStableAtomSync(); queueMutation({ type: 'setCloseOverlayDelay', nodeId: selectedId, trigger: newTrigger, overlayId, delay }); }
     setEditCloseKey(null);
   }, [selectedId]);
 

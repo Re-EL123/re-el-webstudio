@@ -365,6 +365,27 @@ describe('LayoutLiftedStrategy', () => {
     // child is absolute there. Parent is NOT flex → must still bail so
     // AbsoluteInFrameStrategy handles it. The stale-computed reconciliation above
     // is gated on `parent is flex`, so it doesn't swallow this case.
+    // Overlay-in-edit case (2026-09-07): the overlay is display:none until the
+    // edit-mode show rule reveals it, and the computed cache snapshot taken
+    // BEFORE a Layout was added kept saying `block`. On the PRIMARY viewport no
+    // @container override exists, so authored flex must win → layout drag.
+    test('returns TRUE on the primary viewport when computed says block but the parent is authored flex', () => {
+      const nodes = new Map<string, any>([
+        ['node-1', { id: 'node-1', styles: { position: 'relative', flex: '0 0 auto' }, parentId: 'parent-1', isCanvasNode: false }],
+        ['parent-1', { id: 'parent-1', styles: { display: 'flex', position: 'fixed' } }],
+      ]);
+      mockFindNodeComputedStyle.mockImplementation((id: string, _vp: string, prop: string) => {
+        if (id === 'node-1' && prop === 'position') return 'relative';
+        if (id === 'parent-1' && prop === 'display') return 'block'; // STALE (hidden overlay)
+        return '';
+      });
+      const ctx = makeContext({
+        draggedNodes: [makeDraggedNode({ startParentId: 'parent-1' })],
+        nodes,
+      });
+      expect(strategy.canHandle(ctx)).toBe(true);
+    });
+
     test('returns FALSE for a @container-absolute child whose parent is NOT flex on this vp', () => {
       const nodes = new Map<string, any>([
         ['node-1', { id: 'node-1', styles: { position: 'relative' }, parentId: 'parent-1', isCanvasNode: false }],
@@ -378,6 +399,7 @@ describe('LayoutLiftedStrategy', () => {
       const ctx = makeContext({
         draggedNodes: [makeDraggedNode({ startParentId: 'parent-1' })],
         nodes,
+        viewportPrefix: 'tablet-', // a replica: @container overrides only exist there
       });
       expect(strategy.canHandle(ctx)).toBe(false);
     });

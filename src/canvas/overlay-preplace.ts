@@ -80,3 +80,15 @@ export function prePlaceOverlayForEdit(overlayId: string, contentEl: HTMLElement
   trace.action('overlay-preplace:done', { overlayId, placed });
   return placed;
 }
+
+/** Body of the overlay-edit SHOW rule: reveal with the overlay's OWN display
+ *  (flex / grid / block — never a hard `block`, which wiped its flex on the
+ *  canvas) and lift it above the tint. Reads the default variant entry first,
+ *  then the inline style. Pure so the rule can be re-derived whenever the
+ *  node changes (a Layout added after the overlay was opened). */
+export function overlayShowRuleBody(node: { styles?: Record<string, string>; motionVariants?: unknown } | undefined | null): string {
+  const entry = (node?.motionVariants as Record<string, Record<string, string>> | undefined)?.default;
+  const display = String(entry?.display || node?.styles?.display || 'block');
+  const showDisplay = /^(flex|grid|inline-flex|inline-grid|block|inline-block)$/.test(display) ? display : 'block';
+  return `/*persist*/ display: ${showDisplay} !important; z-index: 50 !important;`;
+}

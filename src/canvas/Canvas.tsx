@@ -22,7 +22,8 @@ import { shouldSkipLaggingForcedRender } from './render-integrity';
 import { autoFocusLayersAtom } from '@/code/stores/user-preferences-store';
 import { snappedRulerGuideIdsAtom } from '@/code/stores/ruler-guides-store';
 import { overlayEditingIdAtom, overlayCallsAtom } from '@/code/stores/overlay-store';
-import { prePlaceOverlayForEdit } from '@/canvas/overlay-preplace';
+import { prePlaceOverlayForEdit, overlayShowRuleBody } from '@/canvas/overlay-preplace';
+import { useLiveNode } from '@/code/stores/node-family';
 import { setViewportHeaderOverlayEditMode } from './ViewportHeaderManager';
 import { activeLocaleAtom, isDefaultLocaleAtom, i18nConfigAtom, localeOverridesAtom } from '@/code/stores/locale-store';
 import {
@@ -37,6 +38,7 @@ import CanvasRulers from './ui/CanvasRulers';
 import RulerGuides from './ui/RulerGuides';
 import Comments from './ui/Comments';
 import { getContentRoot, getViewportPrefix, setStyleContext, setUpdatingFromCanvasFlagger, setForceCanvasRender, setReplicaOverridesGetter, getNodeHitsAtPoint, injectCanvasCSS, removeCanvasCSS, forceCanvasRender } from './node-ops';
+import { reclaimKeyboardFocus } from './reclaim-keyboard-focus';
 import { registerTextEditCommitter } from './text-edit-committer';
 // redirectToComponentInstance, redirectToCollectionTemplate, redirectToFitTextWrapper,
 // redirectLayoutNodeToViewport, getIsolatedChildOfGroup, vpIdFromPrefix,
@@ -245,11 +247,7 @@ export default function Canvas() {
     // its children lost the centering and the layout detector read the
     // overlay as a non-layout parent — a child drag started as ABSOLUTE
     // while the live site (no override) laid it out fine (2026-09-06).
-    const ovNode = getNodesSnapshot().get(overlayEditingId);
-    const ovEntry = (ovNode?.motionVariants as Record<string, Record<string, string>> | undefined)?.default;
-    const ovDisplay = String(ovEntry?.display || ovNode?.styles?.display || 'block');
-    const showDisplay = /^(flex|grid|inline-flex|inline-grid|block|inline-block)$/.test(ovDisplay) ? ovDisplay : 'block';
-    injectCanvasCSS(showSelector, `/*persist*/ display: ${showDisplay} !important; z-index: 50 !important;`);
+    injectCanvasCSS(showSelector, overlayShowRuleBody(getNodesSnapshot().get(overlayEditingId)));
     injectCanvasCSS('[data-viewport]', '/*persist*/ position: relative;');
     // Accent tint (standard, kept LIGHT) over viewports AND root-level
     // canvas nodes — every parentless thing on the canvas EXCEPT the edited
@@ -298,6 +296,18 @@ export default function Canvas() {
       forceCanvasRender();
     };
   }, [overlayEditingId]);
+  // The show rule bakes the overlay's display with !important, so it must
+  // FOLLOW the overlay: adding a Layout (block → flex) after the overlay was
+  // opened left the canvas on the stale `display: block !important` while
+  // the source (and the live site) laid the children out in flex — the text
+  // sat top-left instead of centered (live find 2026-09-06). Live-subscribed
+  // node so the rule re-injects the same frame the layout commits.
+  const overlayEditingNode = useLiveNode(overlayEditingId);
+  const overlayEditingDisplay = overlayEditingNode ? overlayShowRuleBody(overlayEditingNode) : '';
+  useEffect(() => {
+    if (!overlayEditingId || !overlayEditingDisplay) return;
+    injectCanvasCSS(`[data-id="${overlayEditingId}"][data-overlay-node]`, overlayEditingDisplay);
+  }, [overlayEditingId, overlayEditingDisplay]);
   // While editing a text node, hide the variant-connection handle — it overlaps the text caret/selection and
   // a drag-to-connect would fight the text selection. Mirrors SelectionOverlay, which also bails on text edit.
   const isTextEditing = useAtomValue(isTextEditingAtom);
@@ -546,6 +556,11 @@ export default function Canvas() {
       const editId = jotaiStore.get(shapeEditingIdAtom);
       trace.action('canvas:bridge-shape-edit-cancelled', { editId });
       if (!editId) return;
+      // The exit click landed INSIDE the iframe (outside-click commit, Escape
+      // after an anchor drag): the iframe now owns keyboard focus and the
+      // parent shortcuts (Cmd+Z of the commit we are about to make) are dead
+      // until it is handed back. Same find as text edit.
+      reclaimKeyboardFocus('shape-edit');
       setShapeEditingId(null);
       setSelectedPoint(null);
       jotaiStore.set(selectedAnchorInfoAtom, null);
@@ -557,6 +572,7 @@ export default function Canvas() {
       const editId = jotaiStore.get(shapeEditingIdAtom);
       trace.action('canvas:bridge-shape-edit-done', { editId });
       if (!editId) return;
+      reclaimKeyboardFocus('shape-edit');
       setShapeEditingId(null);
       setSelectedPoint(null);
       jotaiStore.set(selectedAnchorInfoAtom, null);

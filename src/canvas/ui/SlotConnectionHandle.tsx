@@ -257,6 +257,7 @@ export default function SlotConnectionHandle() {
     <>
       <div
         onPointerDown={handlePointerDown}
+        data-canvas-wheel=""
         style={{
           position: 'fixed',
           left: handlePos.x - PILL_W / 2,

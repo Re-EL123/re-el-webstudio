@@ -32,6 +32,19 @@ import { cameraMoveOps } from '@/canvas/camera-move-store';
 import { trace, observeDOM } from '@/shared/debug-trace';
 import type { PostMessageBridge } from '@/canvas-sandbox/bridge-host';
 
+/** Marker for canvas chrome portalled OUTSIDE the canvas container that must
+ *  still zoom/pan the canvas under the wheel (see the passthrough below). */
+export const CANVAS_WHEEL_MARKER = 'data-canvas-wheel';
+
+/** True when a wheel event's target is marked chrome living outside `container`
+ *  (events inside the container already reach its own listener). */
+export function isCanvasChromeWheel(target: EventTarget | null, container: Element): boolean {
+  const el = target instanceof Element ? target : null;
+  if (!el || container.contains(el)) return false;
+  return el.closest(`[${CANVAS_WHEEL_MARKER}]`) !== null;
+}
+
+
 export interface UseCanvasTransformOptions {
   containerRef: React.RefObject<HTMLDivElement | null>;
   contentRef: React.RefObject<HTMLDivElement | null>;
@@ -198,11 +211,24 @@ export function useCanvasTransform(opts: UseCanvasTransformOptions) {
     };
     window.addEventListener('message', onIframeWheel);
 
+    // Canvas CHROME portalled to document.body (connection handles, the
+    // Add Variant / Add Vector cards) sits visually over the canvas but
+    // OUTSIDE the container, so a pinch or wheel while the cursor rests on
+    // it never reaches the listener above — the browser zoomed the whole page
+    // instead of the canvas (live find 2026-09-07). Chrome opts in with the
+    // `data-canvas-wheel` marker; route those events into the same handler.
+    const onChromeWheel = (e: WheelEvent) => {
+      if (!isCanvasChromeWheel(e.target, container)) return;
+      handleWheel(e, container.getBoundingClientRect());
+    };
+    window.addEventListener('wheel', onChromeWheel, { passive: false, capture: true });
+
     return () => {
       trace.action('canvas-transform:wheel-detach', {});
       container.removeEventListener('wheel', onWheel);
       detachMiddlePan();
       window.removeEventListener('message', onIframeWheel);
+      window.removeEventListener('wheel', onChromeWheel, { capture: true } as any);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 }

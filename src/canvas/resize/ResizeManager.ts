@@ -1352,7 +1352,13 @@ export function startResize(
   // A FIT-text wrapper is an `<svg>` too but a LAYOUT box (pins/insets/% top are
   // its position model, like any text) — never a shape; skip the shape model.
   const isFitWrapper = isFitTextSvgWrapper(nodeData, getDefaultStore().get(nodesAtom));
-  if (nodeData?.type === 'svg' && !isFitWrapper && getNodeFromCache(nodeData.parentId ?? '')?.type !== 'svg') {
+  // FREE shapes only: a shape that is a FLOW child (flex/grid, position
+  // relative/static) has no left/top model at all — writing px insets there
+  // is a relative OFFSET from its slot, so the shape drifted on the first
+  // resize (live find 2026-09-06, shape inside a flex row).
+  const shapePos = nodeData?.type === 'svg' ? findNodeComputedStyles(nodeId, vpId, ['position']).position : '';
+  const isFreeShape = shapePos === 'absolute' || shapePos === 'fixed';
+  if (nodeData?.type === 'svg' && !isFitWrapper && isFreeShape && getNodeFromCache(nodeData.parentId ?? '')?.type !== 'svg') {
     const rect = captureVisualRect(nodeId, vpId);
     const mv = (nodeData.motionVariants ?? {}) as Record<string, Record<string, unknown>>;
     // TILE-EFFECTIVE map: a stale `x`/`%` can live in an entry, not the base.

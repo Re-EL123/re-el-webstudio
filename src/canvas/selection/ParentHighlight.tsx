@@ -27,7 +27,7 @@
 // the parent's actual transformed shape (rotation, skew, etc.). Polls each
 // animation frame so pan/zoom/scroll/transform changes stay in sync.
 
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { usePolledValue } from '@/canvas/hooks/usePolledValue';
 import { dragStateOps } from '@/canvas/drag/drag-state-store';
 import { useAtomValue } from 'jotai';
@@ -39,7 +39,7 @@ import { activeFilePathAtom, isIconSetFilePath } from '@/code/project/active-fil
 import { isComponentFileAtom } from '@/code/stores/store';
 import { shapeEditCommitPendingAtom, shapeEditingIdAtom } from '@/code/stores/shape-edit-store';
 import { sketchEditingIdAtom } from '@/code/stores/sketch-edit-store';
-import { getScreenCornersById, type ScreenCorners } from '@/canvas/resize/geometry-utils';
+import { getScreenCornersById, cornersEqual, type ScreenCorners } from '@/canvas/resize/geometry-utils';
 import { parentHighlightOps, type ParentHighlightInfo } from './parent-highlight-store';
 import { dropLineOps } from './drop-line-store';
 import { resizeLiveOps } from '@/canvas/resize/resize-live-store';
@@ -259,9 +259,36 @@ export default function ParentHighlight() {
   // Gates the DRAG-driven info too — a strategy could still be holding the
   // store when a resize starts. The corner poll above is disabled for the same
   // condition, so the gesture costs no per-frame work here.
+  // POST-RESIZE HOLD. cornersCache still holds the parent's PRE-gesture box
+  // for ~20ms after mouse-up (the sandbox remeasure lands after the commit),
+  // so re-mounting immediately painted the OLD dashed outline, then it
+  // snapped to the hugged size — the visible "before → after" jump the user
+  // reported (2026-09-06). Remember the corners the gesture started from and
+  // stay hidden until the poll returns something else — or a short fallback
+  // elapses for the case where the parent genuinely did not change.
+  const preGestureRef = useRef<ScreenCorners | null>(null);
+  const holdUntilRef = useRef(0);
+  const wasResizingRef = useRef(false);
+  const [, bumpHold] = useState(0);
+  if (isResizing && !wasResizingRef.current) preGestureRef.current = corners;
+  if (!isResizing && wasResizingRef.current) holdUntilRef.current = performance.now() + 160;
+  wasResizingRef.current = isResizing;
+  // The poll only re-renders on a corners CHANGE — when the parent did not
+  // change, nothing would repaint after the fallback expires. Tick once.
+  useEffect(() => {
+    if (isResizing) return;
+    const wait = holdUntilRef.current - performance.now();
+    if (wait <= 0) return;
+    const t = setTimeout(() => bumpHold((n) => n + 1), wait + 5);
+    return () => clearTimeout(t);
+  }, [isResizing]);
+  const heldStale = !isResizing && !!corners && !!preGestureRef.current
+    && performance.now() < holdUntilRef.current && cornersEqual(corners, preGestureRef.current);
+
   if (isResizing) return null;
   if (isCameraMove) return null;
   if (!corners || !info) return null;
+  if (heldStale) return null;
   if (overlaySuppressPending) return null;
   if (sketchEditingId) return null;
   // Hide the dashed parent outline entirely while in shape-edit mode — the

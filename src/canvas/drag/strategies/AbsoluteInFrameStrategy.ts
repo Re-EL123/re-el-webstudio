@@ -43,7 +43,7 @@ import { commitExitToCanvas } from '../exit-commit';
 import { getInsetState, mergeVariantPinStyles } from '@/shared/pin-utils';
 import { parentHighlightOps } from '@/canvas/selection/parent-highlight-store';
 import { dropLineOps } from '@/canvas/selection/drop-line-store';
-import { detectParentLayoutById, getFlexDirectionById } from '../types';
+import { detectParentLayoutById, getFlexDirectionById, resolveParentDisplay } from '../types';
 import { trace } from '@/shared/debug-trace';
 import { motionPropsToCSSTransform, MOTION_TRANSFORM_PROPS } from '@/shared/motion-transform';
 import { calculateLayoutInsertIndexById } from '../reparent-utils';
@@ -290,7 +290,7 @@ export class AbsoluteInFrameStrategy implements DragStrategy {
     this.entryGraceCounter = AbsoluteInFrameStrategy.ENTRY_GRACE_PERIOD;
     this.vpId = vpIdFromPrefix(context.viewportPrefix);
 
-    const parentDisplay = findNodeComputedStyle(this.parentId, this.vpId, 'display');
+    const parentDisplay = resolveParentDisplay(this.parentId, this.vpId, context.nodes.get(this.parentId));
     this.parentIsFlexGrid = parentDisplay === 'flex' || parentDisplay === 'inline-flex'
       || parentDisplay === 'grid' || parentDisplay === 'inline-grid';
 

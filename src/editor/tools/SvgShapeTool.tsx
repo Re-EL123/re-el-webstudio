@@ -46,7 +46,7 @@ import { modifyProjectFile } from '@/code/project/modify-file';
 import { ensureShapeChildIds } from '@/code/generation/generator-attrs';
 import { useNodesComputed } from '@/code/stores/node-family';
 import { selectedPointAtom, shapeEditingIdAtom } from '@/code/stores/shape-edit-store';
-import { selectedIdsAtom, getNodesSnapshot } from '@/code/stores/store';
+import { getCachedNodesMap, selectedIdsAtom, getNodesSnapshot } from '@/code/stores/store';
 import type { CanvasNode } from '@/code/parsing/parser';
 import { resolveShapeAttrTargets } from './svg-shape-targets';
 import { trace } from '@/shared/debug-trace';
@@ -178,6 +178,11 @@ function JoinIcon({ join }: { join: 'miter' | 'round' | 'bevel' }) {
 
 export default function SvgShapeTool() {
   const { nodeId, node, vpId, styles, updateStyle } = useControl();
+  // Mount/unmount trace — a remount here is the "panel flashes on undo" symptom.
+  useEffect(() => {
+    trace.action('svg-shape-tool:mount', {});
+    return () => trace.action('svg-shape-tool:unmount', {});
+  }, []);
 
   const selectedPoint = useAtomValue(selectedPointAtom);
   const childIndex = selectedPoint?.shapeIndex ?? 0;
@@ -193,8 +198,16 @@ export default function SvgShapeTool() {
   const isInShapeEdit = shapeEditingId !== null && nodeId === shapeEditingId;
 
   // Resolve target inner-shape CanvasNode from cached node tree.
+  // `node` is the LIVE cache node (useLiveNode) while `nodes` is the PARSED
+  // map, which an undo/redo restore updates one fan-out later. When the restore
+  // changes the inner shape's id (the toolbar polygon has no child data-id; the
+  // first shape-edit commit rewrites it as `<path data-id="…-g0">`) the parsed
+  // map has no entry for the new child yet, the lookup missed, and this tool
+  // rendered null for one fan-out — the Fill/Stroke sections flashed on every
+  // undo across that boundary (live find 2026-09-06). Fall back to the cache
+  // map the wrapper itself came from; identical ids resolve either way.
   const shapeNode = useNodesComputed(
-    (nodes) => findSvgShapeChild(node, nodes, childIndex)?.node ?? null,
+    (nodes) => (findSvgShapeChild(node, nodes, childIndex) ?? findSvgShapeChild(node, getCachedNodesMap(), childIndex))?.node ?? null,
     [node, childIndex],
   );
 

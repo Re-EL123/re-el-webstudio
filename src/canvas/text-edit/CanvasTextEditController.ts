@@ -51,6 +51,7 @@ import { stripGhostSuffix } from '@/shared/ghost-id';
 import { toCamel } from '@/shared/css-utils';
 import { foldFitParagraphsToBr } from '@/shared/fit-measure';
 import { trace } from '@/shared/debug-trace';
+import { reclaimKeyboardFocus } from '@/canvas/reclaim-keyboard-focus';
 import { holdHistoryCoalescing, releaseHistoryCoalescing, pushHistory } from '@/code/mutation/history';
 
 type JotaiStore = ReturnType<typeof useStore>;
@@ -673,12 +674,7 @@ export class CanvasTextEditController {
    *  fire and every shortcut (⌘C/V/D, undo…) goes dead until some click
    *  lands in the parent document (the "have to unselect the node" find). */
   private reclaimKeyboardFocus(): void {
-    try {
-      window.focus();
-      const active = document.activeElement as HTMLElement | null;
-      if (active && active.tagName === 'IFRAME') active.blur();
-      trace.action('canvas:text-edit-focus-reclaimed', {});
-    } catch { /* ignore */ }
+    reclaimKeyboardFocus('text-edit');
   }
 
   // ─── cancelEdit ────────────────────────────────────────────────────────────

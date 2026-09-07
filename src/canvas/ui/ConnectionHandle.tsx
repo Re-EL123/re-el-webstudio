@@ -302,6 +302,7 @@ export default function ConnectionHandle({ onConnectionCreated }: Props) {
       {/* Handle — white circle with purple inner + lightning bolt (matches old builder) */}
       <svg
         onPointerDown={handlePointerDown}
+        data-canvas-wheel=""
         className="absolute cursor-pointer"
         style={{
           position: 'fixed',

@@ -3,7 +3,7 @@
 // right strategy and routes mouse events to it.
 
 import type { Transform, NodeMap, DraggedNode, PendingUpdate, SnapResult, DropTarget, Point } from '@/shared/types';
-import { findNodeComputedStyle, findNodeComputedStyles, findChildRects } from '@/canvas/node-ops';
+import { findNodeComputedStyle, findNodeComputedStyles, findChildRects, isPrimaryViewport } from '@/canvas/node-ops';
 import { getNodeFromCache } from '@/code/stores/store';
 
 // ─── Drag Context ──────────────────────────────────────────────────────────
@@ -197,6 +197,27 @@ export type ParentLayoutMode = 'absolute' | 'flex' | 'grid' | 'block' | 'none';
  * Determine the layout mode of a parent by nodeId+vpId (bridge-compatible).
  * Returns 'absolute' if the bridge returns empty.
  */
+/** Effective `display` of a drag PARENT for strategy selection.
+ *
+ *  Computed first (replica `@container` overrides only exist there), BUT on
+ *  the PRIMARY viewport the node's own authored flex/grid wins: nothing can
+ *  override it there, so a computed `block` against an authored `flex` is a
+ *  stale cache — an overlay is `display: none` until the edit-mode show rule
+ *  reveals it, and the computed snapshot taken before a Layout was added kept
+ *  saying `block`. That routed a flex child to the absolute strategy, which
+ *  pinned canvas left/top on a `position: relative` text (live find
+ *  2026-09-07: "layout added inside overlay, child still drags absolute").
+ *  Reads the default variant entry too (component masters carry display there). */
+export function resolveParentDisplay(parentId: string, vpId: string, parentNode?: { styles?: Record<string, string>; motionVariants?: unknown } | null): string {
+  const computed = findNodeComputedStyle(parentId, vpId, 'display') || '';
+  const node = parentNode ?? getNodeFromCache(parentId);
+  const entry = (node?.motionVariants as Record<string, Record<string, string>> | undefined)?.default;
+  const authored = String(entry?.display || node?.styles?.display || '');
+  const authoredIsLayout = /^(flex|inline-flex|grid|inline-grid)$/.test(authored);
+  if (authoredIsLayout && isPrimaryViewport(vpId) && computed !== authored) return authored;
+  return computed || authored;
+}
+
 export function detectParentLayoutById(parentId: string, vpId: string): ParentLayoutMode {
   // SVG container fast-path: nested SVG children are positioned via
   // `x/y` ATTRIBUTES, not CSS. Their computed CSS `position` is `static`
@@ -216,9 +237,7 @@ export function detectParentLayoutById(parentId: string, vpId: string): ParentLa
   // block/absolute branch, and a canvas-node drop into it wrongly reparented as
   // absolute + switched to absolute-in-frame (jumpy, no drop-line) instead of
   // showing the layout insertion line.
-  const display = findNodeComputedStyle(parentId, vpId, 'display')
-    || getNodeFromCache(parentId)?.styles?.display
-    || '';
+  const display = resolveParentDisplay(parentId, vpId);
   if (display) {
     if (display === 'flex' || display === 'inline-flex') return 'flex';
     if (display === 'grid' || display === 'inline-grid') return 'grid';

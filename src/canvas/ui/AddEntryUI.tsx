@@ -169,6 +169,7 @@ export function AddEntryCard({ rect, label, title, isInteracting, forceHover, on
   const [isHovered, setIsHovered] = useState(false);
   return (
     <div
+      data-canvas-wheel=""
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onPointerDown={(e) => { e.stopPropagation(); }}

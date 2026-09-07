@@ -17,7 +17,7 @@ import { nextFrames } from '@/shared/dom-utils';
 import { buildCanvasCloneDescriptor } from '../clone-descriptor';
 import { queueBorderOverlayDuplicates } from '@/canvas/creators/creator-utils';
 import type { DragContext, DragStrategy, DragMoveResult } from '../types';
-import { detectParentLayoutById, getFlexDirectionById } from '../types';
+import { detectParentLayoutById, getFlexDirectionById, resolveParentDisplay } from '../types';
 import { getCanvasDelta, isInsideRect, getAbsoluteCanvasRectById, screenToPct } from '@/canvas/canvas-math';
 import { isPrimaryViewport, vpIdFromPrefix, getActiveFilePath, getViewportPrefix, patchNodeStyles, findNodeRect, findNodeComputedStyle, findNodeComputedStyles, findVisibleChildRects, getNodeHitsAtPoint, injectCanvasCSS, removeCanvasCSS, parseRectCacheKey } from '@/canvas/node-ops';
 import { getScreenCornersById, nodeOrAncestorHasRotationOrSkewById, type ScreenCorners } from '@/canvas/resize/geometry-utils';
@@ -352,8 +352,9 @@ export class LayoutLiftedStrategy implements DragStrategy {
     // Effective parent display — same rationale as the child position
     // check above (replica @container can override base flex/grid with
     // a `display: 'block'` from LayoutTool's remove-layout).
-    const parentComputedDisplay = findNodeComputedStyle(firstNode.startParentId, vpId, 'display');
-    const parentDisplay = parentComputedDisplay || parentNode.styles?.display || '';
+    // (`resolveParentDisplay` lets the authored flex/grid win on the PRIMARY
+    // viewport, where a mismatch is always a stale computed cache.)
+    const parentDisplay = resolveParentDisplay(firstNode.startParentId, vpId, parentNode);
     const parentIsFlex = parentDisplay === 'flex' || parentDisplay === 'inline-flex';
 
     // A computed `absolute`/`fixed` normally routes to AbsoluteInFrameStrategy.

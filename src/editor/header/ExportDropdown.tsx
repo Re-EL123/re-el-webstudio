@@ -84,9 +84,48 @@ function TailwindLogo({ size = 16 }: { size?: number }) {
   );
 }
 
+
+function ViteLogo({ size = 16 }: { size?: number }) {
+  // Vite mark: purple→blue chevron with the yellow bolt. Gradients keep the
+  // brand colours on both themes.
+  return (
+    <svg width={size} height={size} viewBox="0 0 410 404" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+      <path
+        d="M399.641 59.525 215.643 388.545c-3.8 6.793-13.56 6.833-17.415.073L10.582 59.556c-4.2-7.363 2.097-16.28 10.446-14.788l184.192 32.923c1.175.21 2.378.208 3.552-.006l180.33-32.87c8.32-1.517 14.649 7.337 10.539 14.71Z"
+        fill="url(#vl1)"
+      />
+      <path
+        d="M292.965 1.574 156.801 28.255a4.999 4.999 0 0 0-4.03 4.611l-8.376 141.464c-.194 3.293 2.83 5.856 6.045 5.114l37.91-8.75c3.505-.809 6.672 2.278 5.952 5.802l-11.263 55.146c-.75 3.667 2.696 6.803 6.28 5.716l23.41-7.113c3.587-1.09 7.036 2.054 6.279 5.723l-17.9 86.62c-1.107 5.35 6.005 8.264 8.98 3.677l1.987-3.061 110.937-221.402c1.834-3.66-1.324-7.83-5.352-7.045l-39.005 7.529c-3.63.7-6.717-2.68-5.692-6.23l25.507-88.415c1.028-3.556-2.07-6.938-5.704-6.227Z"
+        fill="url(#vl2)"
+      />
+      <defs>
+        <linearGradient id="vl1" x1="6" y1="33" x2="235" y2="344" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#41D1FF" /><stop offset="1" stopColor="#BD34FE" />
+        </linearGradient>
+        <linearGradient id="vl2" x1="194.651" y1="8.818" x2="236.076" y2="292.989" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#FFEA83" /><stop offset=".083" stopColor="#FFDD35" /><stop offset="1" stopColor="#FFA800" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
+}
+
+
+function HtmlLogo({ size = 16 }: { size?: number }) {
+  // HTML5 shield in the brand orange; the "5" reads as the format at 18px.
+  return (
+    <svg width={size} height={size} viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+      <path fill="#E44D26" d="M71 460 37 32h438l-34 428-185 52z" />
+      <path fill="#F16529" d="M256 472V72h179l-29 353z" />
+      <path fill="#EBEBEB" d="M256 208h-89l-6-70h95V72H107l16 179h133zm0 148-1 1-60-16-4-43h-56l7 85 114 32z" />
+      <path fill="#fff" d="M255 208v70h84l-8 90-76 20v57l115-32 21-241zm0-136v67h164l6-67z" />
+    </svg>
+  );
+}
+
 // ─── Format catalogue ───────────────────────────────────────────────────────
 
-export type ExportFormat = 'source' | 'tailwind';
+export type ExportFormat = 'source' | 'vite' | 'static' | 'tailwind';
 
 interface FormatDef {
   id: ExportFormat;
@@ -107,6 +146,20 @@ const FORMATS: FormatDef[] = [
     sublabel: 'Full Next.js project',
     minPlan: 'free',
     icon: <NextLogo size={18} />,
+  },
+  {
+    id: 'vite',
+    label: 'Vite project',
+    sublabel: 'Plain Vite + React, no Next.js',
+    minPlan: 'free',
+    icon: <ViteLogo size={18} />,
+  },
+  {
+    id: 'static',
+    label: 'HTML + CSS',
+    sublabel: 'Static snapshot, no JavaScript',
+    minPlan: 'free',
+    icon: <HtmlLogo size={18} />,
   },
   {
     id: 'tailwind',

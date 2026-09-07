@@ -22,6 +22,7 @@ import { settingsOverlayOpenAtom, settingsSectionAtom, websiteMetaAtom } from '@
 import { isComponentFileAtom } from '@/code/stores/store';
 import { LiveDropdown } from './LiveDropdown';
 import { ExportDropdown, type ExportFormat } from './ExportDropdown';
+import ExportConfirmModal, { TRANSFORMATIVE_FORMATS } from '../ui/ExportConfirmModal';
 import { exportProject } from './export-project';
 import { useIsClosedSource } from '@/code/stores/closed-source-store';
 import { parseWebsiteMeta } from './publish-utils';
@@ -133,15 +134,27 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
   // The fetch → blob → download sequence lives in `export-project.ts` so
   // the cmd+K "Export Code" row runs the same path rather than a second
   // copy. Only the spinner and dropdown state are the component's job.
-  const handleExport = useCallback(async () => {
+  // Transformative formats (Vite project, HTML + CSS) confirm first — the
+  // output goes through a rewrite / prerender step and may not match the
+  // source project exactly. Source export downloads straight away.
+  const [confirmFormat, setConfirmFormat] = useState<ExportFormat | null>(null);
+  const runExport = useCallback(async (format: ExportFormat) => {
     if (exporting) return;
     setExporting(true);
     try {
-      if (await exportProject(exportFormat)) setExportOpen(false);
+      if (await exportProject(format)) { setExportOpen(false); setConfirmFormat(null); }
     } finally {
       setExporting(false);
     }
-  }, [exporting, exportFormat]);
+  }, [exporting]);
+  const handleExport = useCallback(() => {
+    if (TRANSFORMATIVE_FORMATS.has(exportFormat)) {
+      trace.action('header:export-confirm-open', { format: exportFormat });
+      setConfirmFormat(exportFormat);
+      return;
+    }
+    void runExport(exportFormat);
+  }, [exportFormat, runExport]);
 
   // Open Settings → Plans tab when the user clicks the upgrade
   // affordance inside the export dropdown.
@@ -280,6 +293,12 @@ export default function RightHeader({ previewMode, onTogglePreview }: Props) {
               Export is unavailable — this template's creator made its code closed source.
             </div>
           )}
+          <ExportConfirmModal
+            format={confirmFormat}
+            exporting={exporting}
+            onConfirm={() => { if (confirmFormat) void runExport(confirmFormat); }}
+            onClose={() => setConfirmFormat(null)}
+          />
           <ExportDropdown
             open={exportOpen}
             meta={meta}

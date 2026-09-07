@@ -19,6 +19,7 @@ import { modifyProjectFile } from '@/code/project/modify-file';
 import { queueMutation } from '@/code/mutation/mutation-queue';
 import { projectFS } from '@/code/project/project-fs';
 import { reattachPastedOverlayInCode, stripPastedOverlayInCode } from '@/code/generation/overlay-gen';
+import { isOverlayNode, parseOverlayTriggerCalls } from '@/code/parsing/overlay-parser';
 import { rebuildPastedCollectionInCode } from '@/code/generation/cms-paste-gen';
 import { copySlotConnectionsInCode } from '@/code/generation/slot-ops';
 import { rehydrateCmsBindings } from '@/code/generation/cms-detach-gen';
@@ -86,6 +87,14 @@ export function executePaste(opts: PasteOptions): PasteResult {
     activeFilePath: opts.activeFilePath,
     sourceFilePath: data.sourceFilePath ?? null,
   };
+
+  // FRAMER PARITY (2026-09-07): copying an OVERLAY alone and pasting with
+  // another node selected ATTACHES a copy of that overlay to the selected node
+  // (same content, same side/align/offset/trigger). Before: the overlay pasted
+  // as a plain frame inside the selection (invalid — an overlay must be the
+  // root's last child — and wired to nothing).
+  const attached = attachCopiedOverlayToSelection(ctx, opts);
+  if (attached) return attached;
 
   const rule = findMatchingRule(ctx);
   if (!rule) {
@@ -162,6 +171,61 @@ export function executePaste(opts: PasteOptions): PasteResult {
 }
 
 // ─── Overlay reattach helper ────────────────────────────────────────────────
+
+/** Clipboard = exactly one OVERLAY node (no trigger copied) + exactly one
+ *  selected non-overlay node → paste the overlay element, then rebuild the
+ *  runtime machine with the SELECTED node as its trigger. Returns null when the
+ *  shape doesn't match so the normal rules run. */
+function attachCopiedOverlayToSelection(ctx: PasteContext, opts: PasteOptions): PasteResult | null {
+  const inClipboard = new Set(ctx.clipboardNodes.map((n) => n.id));
+  const roots = ctx.clipboardNodes.filter((n) => !n.parentId || !inClipboard.has(n.parentId));
+  if (roots.length !== 1) return null;
+  const root = roots[0]!;
+  if (!isOverlayNode(root)) return null;
+  if (ctx.clipboardNodes.some((n) => n.overlayTriggerTargetId)) return null; // trigger + overlay pair → normal reattach path
+  if (ctx.selectedIds.length !== 1 || !opts.activeFilePath) return null;
+  const selectedId = ctx.selectedIds[0]!;
+  const selected = ctx.nodes.get(selectedId);
+  if (!selected || isOverlayNode(selected) || selectedId === root.id) return null;
+  let overlayConfig: OverlayConfig;
+  try { overlayConfig = JSON.parse(root.attrs?.['data-overlay'] || '{}'); } catch { return null; }
+  if (!overlayConfig.type) return null;
+  const code = projectFS.readFile(opts.activeFilePath) ?? '';
+  const triggers = parseOverlayTriggerCalls(code);
+  if (triggers.some((t) => t.triggerId === selectedId)) {
+    trace.action('paste:overlay-attach-refused-has-overlay', { selectedId });
+    return { success: false, createdIds: [], message: 'This element already has an overlay' };
+  }
+  const destIsComponentMaster = /export\s+default\s+withResponsiveProps\s*\(/.test(code);
+  if (destIsComponentMaster && overlayConfig.type === 'fixed') {
+    trace.action('paste:overlay-attach-refused-fixed-in-master', { selectedId });
+    return { success: false, createdIds: [], message: 'Fixed overlays are not available inside a component' };
+  }
+  // The copied overlay's own trigger config (same file) or the defaults.
+  const sourceTrigger = triggers.find((t) => t.config.targetId === root.id || t.triggerId === overlayConfig.triggerId);
+  const triggerConfig: OverlayTriggerConfig = sourceTrigger
+    ? { ...sourceTrigger.config, targetId: '' }
+    : { targetId: '', trigger: 'click', dismiss: 'outside' };
+  // 1. Land the bare overlay element as a root child (no per-viewport hide
+  //    cascade — an overlay is not a viewport-scoped node).
+  const idMapper = createIdMapper();
+  // `viewport-children` resolves against the PAGE ROOT: walk up from the
+  // selected node to its top-level ancestor (the page/master root).
+  let rootId = selectedId;
+  for (let cur: CanvasNode | undefined = selected, i = 0; cur?.parentId && i < 64; i++) { rootId = cur.parentId; cur = ctx.nodes.get(cur.parentId); }
+  const bareCtx: PasteContext = { ...ctx, selectedIds: [rootId], interactingVpId: undefined };
+  executeWithConfig(bareCtx, { targetMode: 'viewport-children', positioning: 'last-child', styleTransform: 'preserve' }, idMapper);
+  const newOverlayId = idMapper.getAllMappings().get(root.id)?.[0];
+  if (!newOverlayId) return { success: false, createdIds: [], message: 'Overlay paste failed' };
+  // 2. Rebuild the machine around it with the SELECTED node as trigger.
+  modifyProjectFile(opts.activeFilePath, (c) => reattachPastedOverlayInCode(
+    c, selectedId, newOverlayId,
+    { ...overlayConfig, triggerId: selectedId },
+    { ...triggerConfig, targetId: newOverlayId },
+  ));
+  trace.action('paste:overlay-attached-to-selection', { selectedId, newOverlayId, from: root.id, trigger: triggerConfig.trigger });
+  return { success: true, createdIds: [newOverlayId], attachedOverlayId: newOverlayId };
+}
 
 /**
  * Rebuild every copied overlay against its pasted trigger. For each clipboard

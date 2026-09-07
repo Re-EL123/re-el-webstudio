@@ -883,9 +883,9 @@ export default function ContextMenu() {
           <MenuItem label="Ungroup" shortcut="Ctrl+Shift+G" onClick={handleUngroupSvgs} />
         )}
         {/* "Make into Map" (inline .map() repeater) was retired — CMS
-            collection lists are the single authoring path for repeats now.
-            The inline-map ENGINE (parser `inlineMapData` + Renderer ghosts +
-            map-gen) is kept so any EXISTING inline maps still render/edit. */}
+            collection lists are the single authoring path for repeats now;
+            the inline-map engine is gone and the oracle rejects inline
+            \`.map()\` repeaters (INLINE_MAP_UNSUPPORTED). */}
         {/* No "Unbind from <collection>" item — the reference has no such action; a
             collection list is removed by deleting it, not unbound in place.
             (Binding happens by dragging a collection from the Insert panel.) */}

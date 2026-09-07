@@ -279,6 +279,9 @@ export interface PasteResult {
   success: boolean;
   createdIds: string[];
   message?: string;
+  /** Set when a copied overlay was ATTACHED to the selected node: the UI
+   *  enters overlay edit mode on it (same follow-up as the Overlay tool's Add). */
+  attachedOverlayId?: string;
 }
 
 export interface CopyResult {

@@ -560,7 +560,7 @@ export function makeComponent(
    *  "create component from the first collection item" auto-wire (Mechanism B). */
   cmsItemVar?: string,
   /** The collection-list `source` of the nearest collectionList ancestor — a CMS
-   *  slug (or `__inline:<var>`). Used to seed each hoisted prop's DEFAULT from the
+   *  slug. Used to seed each hoisted prop's DEFAULT from the
    *  collection's first item and TYPE it from the schema (image → image var, …). */
   cmsSource?: string,
 ): { componentFilePath: string; updatedPageCode: string } | null {
@@ -969,7 +969,7 @@ export function makeComponent(
       const imageFields = new Set<string>();
       const fieldTypes: Record<string, string> = {};
       let first: Record<string, any> | undefined;
-      if (cmsSource && !cmsSource.startsWith('__inline:')) {
+      if (cmsSource) {
         const schema = getCollectionSchema(cmsSource);
         first = getCollectionData(cmsSource)[0] as Record<string, any> | undefined;
         if (schema) {

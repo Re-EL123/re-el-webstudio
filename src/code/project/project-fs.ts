@@ -9,6 +9,7 @@ import { trace } from '@/shared/debug-trace';
 import { parseJSX } from '@/code/parsing/ast-utils';
 import { findVariantRootId, insertAtRootRestSpread, stampRootDataVariantAttr } from '@/shared/variant-root';
 import { nodeIdToVarName } from '@/shared/id-utils';
+import { healStyleBlockImportant } from '@/shared/media-important';
 import { ensureLayoutFile } from '@/code/generation/metadata-gen';
 import {
   ANIMATED_COUNTER_COMPONENT,
@@ -298,6 +299,22 @@ export class InMemoryProjectFS implements ProjectFS {
         this.files.set(path, healed);
         trace.action('project-fs:migrated-variant-root-insets', { path });
       }
+    }
+    // Banded `!important` heal: base styles are inline, so a `@media` band or
+    // `:lang()` declaration without `!important` paints on the canvas (band
+    // values are baked onto the tiles) but NEVER on the live site. Every
+    // builder generator writes it; AI/hand-written pages did not (2026-09-07:
+    // a user's responsive headings, paddings and column flips all dead on
+    // publish). Append it to every scoped declaration that lacks it —
+    // idempotent, parse-gated, style-literal only.
+    for (const [path, src] of this.files) {
+      if (!path.endsWith('.tsx') || !(path.startsWith('app/') || path.startsWith('components/'))) continue;
+      if (!src.includes('<style>')) continue;
+      const healed = healStyleBlockImportant(src);
+      if (healed === src) continue;
+      try { parseJSX(healed); } catch { trace.error('project-fs:media-important-heal-unparseable', path); continue; }
+      this.files.set(path, healed);
+      trace.action('project-fs:migrated-media-important', { path });
     }
     // Restore a WIPED reset: addPresetTokenToCSS used to REPLACE globals.css
     // wholesale when it had no :root block yet (fixed 2026-08-31), erasing the

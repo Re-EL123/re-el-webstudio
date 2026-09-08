@@ -25,6 +25,8 @@ import { beginViewportWidthScrub, type ViewportWidthScrub } from '@/canvas/resiz
 import { canUseFill, isMainAxis, isFillMode, getFillMultiplier, makeFillFlex, parseFlex, formatFlex, crossAxisFillPatch } from '@/shared/flex-helpers';
 import { convertPxToDimUnit, estimatedVpHeight, pickLiveDim, fitSizeRedirectTarget, exitFillFlexPatch, isAutoDim, resolveUnitChangePx } from './size-helpers';
 import { resizeLiveOps } from '@/canvas/resize/resize-live-store';
+import { captureVisualRect } from '@/canvas/visual-rect';
+import { needsSizeCompensation, sizeInputWrite } from '@/canvas/resize/size-input-compensation';
 import { trace } from '@/shared/debug-trace';
 
 // ─── Unit parsing ───────────────────────────────────────────────────────────
@@ -845,6 +847,33 @@ export default function SizeTool({ styles: stylesProp, nodeId: nodeIdProp, vpId,
   }, [isAspectRatioLocked, computed.width, computed.height, styles.width, styles.height, nodeId, onUpdateMultiple]);
 
   // ─── Width change handler ─────────────────────────────────────────────
+  // TRANSFORMED absolute element: a typed px size behaves like the resize
+  // handle — the element's own top-left corner stays visually fixed (the
+  // ResizeManager's opposite-corner compensation). Without it a rotated bar
+  // slid along its axis on every value change (2026-09-08). Returns the
+  // combined size + inset write, or null when the plain write is right.
+  const transformedSizeWrite = useCallback((axis: 'width' | 'height', v: string): Record<string, string> | null => {
+    if (parentLayout !== 'none') return null;
+    const pos = styles.position;
+    if (pos !== 'absolute' && pos !== 'fixed') return null;
+    const trimmed = (v || '').trim();
+    if (!/^-?[\d.]+(px)?$/.test(trimmed)) return null;
+    const matrixStr = findNodeComputedStyles(nodeId, vpId, ['transform']).transform || '';
+    if (!needsSizeCompensation(matrixStr)) return null;
+    const box = captureVisualRect(nodeId, vpId);
+    if (!box) return null;
+    const px = parseFloat(trimmed);
+    const out = sizeInputWrite({
+      styles,
+      box: { left: box.left, top: box.top, width: box.width, height: box.height },
+      parentWidth: box.parentWidth, parentHeight: box.parentHeight, matrixStr,
+      newWidth: axis === 'width' ? px : box.width,
+      newHeight: axis === 'height' ? px : box.height,
+    });
+    if (out) trace.action('size:transformed-input-compensation', { nodeId, axis, value: px, write: out });
+    return out;
+  }, [parentLayout, styles, nodeId, vpId]);
+
   const handleWidthChange = useCallback((v: string) => {
     // Currently in fill mode — changing the multiplier (preserve shrink + basis)
     if (isWidthFill) {
@@ -896,9 +925,11 @@ export default function SizeTool({ styles: stylesProp, nodeId: nodeIdProp, vpId,
       const newStyles = computeDimensionInsetStyles(inset, styles, 'width', newWidth, computed.parentWidth);
       onUpdateMultiple(newStyles);
     } else {
-      onUpdate('width', v);
+      const compensated = transformedSizeWrite('width', v);
+      if (compensated) onUpdateMultiple(compensated);
+      else onUpdate('width', v);
     }
-  }, [isWidthFill, inset, styles, nodeId, computed.parentWidth, computed.width, aspectRatioNum, onUpdate, onUpdateMultiple]);
+  }, [isWidthFill, inset, styles, nodeId, computed.parentWidth, computed.width, aspectRatioNum, onUpdate, onUpdateMultiple, transformedSizeWrite]);
 
   // Shared trigger for the "switch to auto on a no-layout frame" case.
   // Called from both width AND height unit-change handlers BEFORE writing
@@ -1093,9 +1124,11 @@ export default function SizeTool({ styles: stylesProp, nodeId: nodeIdProp, vpId,
       const newStyles = computeDimensionInsetStyles(inset, styles, 'height', newHeight, computed.parentHeight);
       onUpdateMultiple(newStyles);
     } else {
-      onUpdate('height', v);
+      const compensated = transformedSizeWrite('height', v);
+      if (compensated) onUpdateMultiple(compensated);
+      else onUpdate('height', v);
     }
-  }, [isHeightFill, inset, styles, nodeId, computed.parentHeight, computed.height, computed.width, computed.parentWidth, aspectRatioNum, onUpdate, onUpdateMultiple]);
+  }, [isHeightFill, inset, styles, nodeId, computed.parentHeight, computed.height, computed.width, computed.parentWidth, aspectRatioNum, onUpdate, onUpdateMultiple, transformedSizeWrite]);
 
   const handleHeightUnitChange = useCallback((fromUnit: DimUnit, toUnit: DimUnit, typedNum?: number) => {
     // Switching TO fill

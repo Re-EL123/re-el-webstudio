@@ -294,7 +294,10 @@ export default function ContextMenu() {
     let cmsItemVar: string | undefined;
     let cmsSource: string | undefined;
     {
-      let cursor: typeof targetNode | null = targetNode ?? null;
+      // Start at the PARENT: a node that IS the collection container (Make
+      // Component on the whole list) is not inside its own `.map()` — hoisting
+      // its row bindings rewrote every row to the first item (2026-09-08).
+      let cursor: typeof targetNode | null = targetNode?.parentId ? nodes.get(targetNode.parentId) ?? null : null;
       for (let i = 0; i < 12 && cursor; i++) {
         // `source` (the collection slug) lets makeComponent seed prop defaults + types
         // from the collection's first item — so the new master renders real content.

@@ -169,7 +169,7 @@ import {
   createCollectionListInCode, bindFieldInCode, unbindFieldInCode,
   updateCollectionListConfigInCode,
 } from '../generation/cms-gen';
-import { setPaginationInCode, removePaginationInCode, ensureLoadMoreComponentFile, ensureSpinnerComponentFile, readPaginationMarker, pruneOrphanedPaginationHooks } from '../generation/cms-pagination-gen';
+import { setPaginationInCode, removePaginationInCode, ensureLoadMoreComponentFile, ensureSpinnerComponentFile, readPaginationMarker, pruneOrphanedPaginationHooks, paginationUiParentId } from '../generation/cms-pagination-gen';
 import { addSearchFieldInCode, setSearchInputVariableInCode } from '../generation/cms-search-field-gen';
 import { writeResponsiveListConfigInCode, type ResponsiveListConfig } from '../generation/cms-responsive-gen';
 import { duplicateCollectionListToCanvasInCode } from '../generation/cms-paste-gen';
@@ -2759,6 +2759,16 @@ function applyMutationCore(code: string, mutation: Mutation): string {
       }
 
       case 'removeNode': {
+        // Deleting the Load More instance / infinite-scroll sentinel IS
+        // "remove pagination" for its list: the element lives inside the
+        // `{vis < slug.length && …}` guard, so stripping only the JSX left
+        // `{vis < blog.length && }` — a parse error that blocked the delete
+        // (2026-09-08). Route through the full teardown instead.
+        const paginatedList = paginationUiParentId(code, mutation.nodeId);
+        if (paginatedList) {
+          trace.action('mutation:removeNode-pagination-ui', { nodeId: mutation.nodeId, listId: paginatedList });
+          return pruneOrphanedPaginationHooks(removePaginationInCode(code, paginatedList));
+        }
         // Strip the element, then drop any connection whose trigger element is
         // now gone (its onTap went with the element; the `connections` entry +
         // arrow would otherwise linger as dead data). Presence-based so it also

@@ -1957,9 +1957,15 @@ const GHOST_OWN_ATTRS = new Set(['data-node-id', 'data-collection-ghost', 'style
  * Bound values are unaffected — `applyBindingDataToTree` runs immediately after
  * this and rewrites them per row.
  */
-function syncInlineStyles(templateEl: HTMLElement, ghostEl: HTMLElement): void {
+export function syncInlineStyles(templateEl: HTMLElement, ghostEl: HTMLElement): void {
   const copyPair = (tEl: HTMLElement, gEl: HTMLElement) => {
-    gEl.style.cssText = tEl.style.cssText;
+    // A drag-locked template node carries the LIFT geometry (position/left/
+    // top/zIndex at the cursor) as inline style. Copying that onto the ghost
+    // would fling every ghost's copy of the node to the lifted spot; the
+    // ghost keeps its own last-synced styles until the drop.
+    if (!_dragLockedNodeIds.has(tEl.getAttribute('data-id') ?? '')) {
+      gEl.style.cssText = tEl.style.cssText;
+    }
     for (const attr of Array.from(tEl.attributes)) {
       if (GHOST_OWN_ATTRS.has(attr.name)) continue;
       if (gEl.getAttribute(attr.name) !== attr.value) gEl.setAttribute(attr.name, attr.value);

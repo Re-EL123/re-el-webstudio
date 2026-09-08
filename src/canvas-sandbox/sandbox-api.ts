@@ -141,8 +141,10 @@ export interface SandboxApi {
   /**
    * Hide/show the DOM-only ghost copies of a CMS collection list during a
    * layout drag of one of its items. Set on lift / cleared on cleanup.
+   * With `nodeId` (a node INSIDE the row is dragged) only that node's ghost
+   * copies are hidden (visibility), the rows stay.
    */
-  setCollectionGhostsHidden(containerId: string, vpPrefix: string, hidden: boolean): void | Promise<void>;
+  setCollectionGhostsHidden(containerId: string, vpPrefix: string, hidden: boolean, nodeId?: string): void | Promise<void>;
 
   /** Re-measure every node's rect/corners after a reorder's DOM mutations
    *  (cancels any premature pending remeasure) so overlays snap instantly. */

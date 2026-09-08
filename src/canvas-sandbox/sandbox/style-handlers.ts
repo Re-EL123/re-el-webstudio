@@ -110,7 +110,7 @@ export function untrackLiveImportant(el: HTMLElement, kebab: string): void {
    *  template.cssText` re-sync that can fire mid-drag — an inline `display:none`
    *  would get wiped by that, an `!important` rule wins over the non-important
    *  inline display the cssText copy restores. Cleared on drag end. */
-export function setCollectionGhostsHidden(containerId: string, vpPrefix: string, hidden: boolean): void {
+export function setCollectionGhostsHidden(containerId: string, vpPrefix: string, hidden: boolean, nodeId?: string): void {
     if (!contentRoot) return;
     const STYLE_ID = 'collection-ghost-hide-style';
     let styleEl = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
@@ -120,11 +120,17 @@ export function setCollectionGhostsHidden(containerId: string, vpPrefix: string,
         styleEl.id = STYLE_ID;
         document.head.appendChild(styleEl);
       }
-      styleEl.textContent = `[data-node-id="${vpPrefix}${containerId}"] > [data-collection-ghost] { display: none !important; }`;
+      // `nodeId` = a node INSIDE the row is being dragged (a title, an image):
+      // hide only ITS copies in the ghost rows — `visibility` so every row keeps
+      // its layout — never the rows themselves. Ghost descendants carry
+      // data-node-id = vpPrefix + id + '__N' (see Renderer ghost build).
+      styleEl.textContent = nodeId
+        ? `[data-node-id="${vpPrefix}${containerId}"] > [data-collection-ghost] [data-node-id^="${vpPrefix}${nodeId}__"] { visibility: hidden !important; }`
+        : `[data-node-id="${vpPrefix}${containerId}"] > [data-collection-ghost] { display: none !important; }`;
     } else if (styleEl) {
       styleEl.textContent = '';
     }
-    trace.action('sandbox:collection-ghosts-hidden', { containerId, vpPrefix, hidden });
+    trace.action('sandbox:collection-ghosts-hidden', { containerId, vpPrefix, hidden, nodeId: nodeId ?? null });
 }
 
 export function patchStyles(nodeId: string, vpPrefix: string, styles: Record<string, string>, important: boolean): void {

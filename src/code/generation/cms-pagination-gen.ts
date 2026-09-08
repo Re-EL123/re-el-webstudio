@@ -19,7 +19,7 @@ import {
   COLLECTION_MAP_CALL_RE,
   extractCollectionSlug,
 } from './cms-gen';
-import { insertConstIntoEnclosingFn } from './cms-responsive-gen';
+import { insertConstIntoEnclosingFn, listConfigVar } from './cms-responsive-gen';
 
 export type PaginationMode = 'loadMore' | 'infinite';
 
@@ -73,6 +73,7 @@ function ${LOADMORE_COMPONENT_NAME}({ style, initialVariant = 'default', onLoadM
     }}>
     <motion.p layout={true} data-id="loadmore-label" data-name="Text" style={{
         fontSize: '14px',
+        whiteSpace: 'nowrap',
         color: '#ffffff',
         fontFamily: 'Inter, sans-serif',
         fontWeight: '500',
@@ -181,9 +182,35 @@ export function ensureLoadMoreComponentFile(): void {
   const isOldAutoGen = existing != null
     && existing.includes('data-id="loadmore-root"')
     && !existing.includes("width: 'min-content'");
-  if (existing != null && !isOldAutoGen) return;
+  if (existing != null && !isOldAutoGen) {
+    // In-place patch for the current shape (keeps the user's own styling):
+    // the root is `width: 'min-content'`, so a label that may wrap collapses
+    // to its longest word and "Load More" stacks one word per line. The label
+    // never wraps (2026-09-08).
+    const patched = ensureLoadMoreLabelNowrap(existing);
+    if (patched !== existing) {
+      projectFS.writeFile(LOADMORE_COMPONENT_PATH, patched);
+      trace.action('cms-pagination:ensureLoadMoreComponentFile', { path: LOADMORE_COMPONENT_PATH, patched: 'label-nowrap' });
+    }
+    return;
+  }
   projectFS.writeFile(LOADMORE_COMPONENT_PATH, buildLoadMoreComponentCode());
   trace.action('cms-pagination:ensureLoadMoreComponentFile', { path: LOADMORE_COMPONENT_PATH, upgraded: isOldAutoGen });
+}
+
+/** Add `whiteSpace: 'nowrap'` to the auto-generated label's style object when
+ *  it has no whiteSpace at all. Idempotent; untouched when the label is gone. */
+export function ensureLoadMoreLabelNowrap(code: string): string {
+  const tag = code.indexOf('data-id="loadmore-label"');
+  if (tag === -1) return code;
+  const styleStart = code.indexOf('style={{', tag);
+  if (styleStart === -1) return code;
+  const styleEnd = code.indexOf('}}', styleStart);
+  if (styleEnd === -1) return code;
+  const body = code.slice(styleStart, styleEnd);
+  if (/\bwhiteSpace\s*:/.test(body)) return code;
+  const insertAt = styleStart + 'style={{'.length;
+  return code.slice(0, insertAt) + "\n        whiteSpace: 'nowrap'," + code.slice(insertAt);
 }
 
 /** The deploy-correct Spinner COMPONENT master (design-tool parity). A conic-gradient
@@ -400,4 +427,60 @@ export function removePaginationInCode(code: string, parentId: string): string {
   result = result.replace(/;(?:\s*\d+;)+/g, ';');
 
   return result;
+}
+
+/** When `nodeId` is a pagination UI node the editor generated for a list —
+ *  the Load More instance (`loadmore-<listId>`), the infinite-scroll sentinel
+ *  (`sentinel-<listId>`) or its Spinner (`spinner-<listId>`) — return the list
+ *  id, else null. Deleting one of these must tear down the WHOLE pagination
+ *  (guard expression, `.slice`, hooks, imports): a plain element strip leaves
+ *  `{vis < blog.length && }` behind — a parse error that blocks the delete
+ *  (2026-09-08). Tag-verified: the id shape alone is not proof (a user can
+ *  name a frame `loadmore-x`), so the element must carry
+ *  `data-pagination-ui="true"` or, for the spinner, sit inside such a sentinel. */
+export function paginationUiParentId(code: string, nodeId: string): string | null {
+  const m = /^(loadmore|sentinel|spinner)-(.+)$/.exec(nodeId);
+  if (!m) return null;
+  const listId = m[2];
+  const check = (id: string): boolean => {
+    const idx = code.indexOf(`data-id="${id}"`);
+    if (idx === -1) return false;
+    const tagStart = code.lastIndexOf('<', idx);
+    const tagEnd = findTagClose(code, tagStart);
+    if (tagStart === -1 || tagEnd === -1) return false;
+    return code.slice(tagStart, tagEnd).includes('data-pagination-ui="true"');
+  };
+  if (m[1] === 'spinner') return check(`sentinel-${listId}`) ? listId : null;
+  return check(nodeId) ? listId : null;
+}
+
+/** The body hooks a paginated list owns — `const [visX, setVisX] = useState(N)`,
+ *  the infinite-scroll `useRef` + IntersectionObserver `useEffect`, and the
+ *  responsive `listCfgX = useResponsiveListConfig(…)` const — verbatim, in
+ *  declaration order. Used when the list MOVES to another function body (Make
+ *  Component): the JSX carries `.slice(0, visX)` and the Load More guard, so the
+ *  hooks must follow or the master crashes "visX is not defined" (2026-09-08). */
+export function collectPaginationHooks(code: string, containerId: string): string[] {
+  const stateVar = paginationStateVar(containerId);
+  const setter = setterFor(stateVar);
+  const refVar = stateVar + 'Ref';
+  const hooks: string[] = [];
+  const grab = (re: RegExp) => { const m = code.match(re); if (m) hooks.push(m[0]); };
+  grab(new RegExp(`const ${listConfigVar(containerId)} = useResponsiveListConfig\\([\\s\\S]*?\\);`));
+  grab(new RegExp(`const \\[${stateVar}, ${setter}\\] = useState\\([^)]*\\);`));
+  grab(new RegExp(`const ${refVar} = useRef\\([^)]*\\);`));
+  grab(new RegExp(`useEffect\\(\\(\\) => \\{[\\s\\S]*?${refVar}[\\s\\S]*?\\}, \\[\\]\\);`));
+  return hooks;
+}
+
+/** Every `data-pagination` container id inside `jsx`. */
+export function paginatedContainerIds(jsx: string): string[] {
+  const out: string[] = [];
+  const re = /<[A-Za-z][^>]*?\bdata-pagination="(?:loadMore|infinite):\d+"/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(jsx)) !== null) {
+    const idM = /\bdata-id="([^"]+)"/.exec(m[0]);
+    if (idM && !out.includes(idM[1])) out.push(idM[1]);
+  }
+  return out;
 }

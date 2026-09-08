@@ -120,3 +120,19 @@ describe('setCollectionGhostsHidden — row vs node-inside-row', () => {
     root.remove();
   });
 });
+
+import { setNodeHidden } from './style-handlers';
+
+describe('setNodeHidden — transient drop hide in a head stylesheet', () => {
+  it('adds/removes a per-node rule in document.head, independent of the renderer-owned canvas sheet', () => {
+    const sheet = () => document.getElementById('node-transient-hide-style')?.textContent ?? '';
+    setNodeHidden('VuDaNu-1', '', true);
+    expect(sheet()).toBe('[data-node-id="VuDaNu-1"] { visibility: hidden !important; }');
+    setNodeHidden('frame-2', 'desktop:', true);
+    expect(sheet()).toContain('[data-node-id="desktop:frame-2"]');
+    setNodeHidden('VuDaNu-1', '', false);
+    expect(sheet()).toBe('[data-node-id="desktop:frame-2"] { visibility: hidden !important; }');
+    setNodeHidden('frame-2', 'desktop:', false);
+    expect(sheet()).toBe('');
+  });
+});

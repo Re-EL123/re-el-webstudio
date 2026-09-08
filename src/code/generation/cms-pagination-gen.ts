@@ -20,6 +20,7 @@ import {
   extractCollectionSlug,
 } from './cms-gen';
 import { insertConstIntoEnclosingFn, listConfigVar } from './cms-responsive-gen';
+import { ensureTextNodeNowrap } from './label-nowrap';
 
 export type PaginationMode = 'loadMore' | 'infinite';
 
@@ -198,19 +199,9 @@ export function ensureLoadMoreComponentFile(): void {
   trace.action('cms-pagination:ensureLoadMoreComponentFile', { path: LOADMORE_COMPONENT_PATH, upgraded: isOldAutoGen });
 }
 
-/** Add `whiteSpace: 'nowrap'` to the auto-generated label's style object when
- *  it has no whiteSpace at all. Idempotent; untouched when the label is gone. */
+/** Load More label never wraps — see label-nowrap.ts. */
 export function ensureLoadMoreLabelNowrap(code: string): string {
-  const tag = code.indexOf('data-id="loadmore-label"');
-  if (tag === -1) return code;
-  const styleStart = code.indexOf('style={{', tag);
-  if (styleStart === -1) return code;
-  const styleEnd = code.indexOf('}}', styleStart);
-  if (styleEnd === -1) return code;
-  const body = code.slice(styleStart, styleEnd);
-  if (/\bwhiteSpace\s*:/.test(body)) return code;
-  const insertAt = styleStart + 'style={{'.length;
-  return code.slice(0, insertAt) + "\n        whiteSpace: 'nowrap'," + code.slice(insertAt);
+  return ensureTextNodeNowrap(code, 'loadmore-label');
 }
 
 /** The deploy-correct Spinner COMPONENT master (design-tool parity). A conic-gradient
@@ -483,4 +474,14 @@ export function paginatedContainerIds(jsx: string): string[] {
     if (idM && !out.includes(idM[1])) out.push(idM[1]);
   }
   return out;
+}
+
+/** Load-time heal: an existing Load More master (any gen) gets the nowrap label. */
+export function migrateLoadMoreLabelNowrap(): void {
+  const existing = projectFS.readFile(LOADMORE_COMPONENT_PATH);
+  if (existing == null || !existing.includes('data-id="loadmore-root"')) return;
+  const healed = ensureLoadMoreLabelNowrap(existing);
+  if (healed === existing) return;
+  projectFS.writeFile(LOADMORE_COMPONENT_PATH, healed);
+  trace.action('cms-pagination:migrated-loadmore-label-nowrap', { path: LOADMORE_COMPONENT_PATH });
 }

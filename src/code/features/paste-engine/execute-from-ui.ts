@@ -89,6 +89,10 @@ export function executePaste(
   // and remounts on the next render after flush ("reappears"). The visible
   // result is a one-frame flash on every paste.
   const finish = (result: PasteResult): void => {
+    if (!result.success && result.userFacing && result.message) {
+      toast.error(result.message);
+      return;
+    }
     if (result.success && result.createdIds.length > 0) {
       flushNow();
       setSelectedId(result.createdIds[0]);

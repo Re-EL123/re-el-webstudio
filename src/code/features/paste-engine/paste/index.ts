@@ -7,6 +7,7 @@
 //   4. Return created IDs for the call-site to select
 
 import { reinjectTranslations } from './translations-reinject';
+import { wouldCreateComponentCycle } from '@/code/components/component-cycle';
 import { trace } from '@/shared/debug-trace';
 import type { CanvasNode } from '@/code/parsing/parser';
 import type { Transform } from '@/shared/types';
@@ -70,6 +71,19 @@ export function executePaste(opts: PasteOptions): PasteResult {
   const data = opts.overrideClipboard ?? getClipboardData();
   if (!data || data.nodes.length === 0) {
     return { success: false, createdIds: [], message: 'Empty clipboard' };
+  }
+
+  // A clipboard that carries an instance of the ACTIVE master (or of a master
+  // whose chain renders it) can't land here — the master would render itself
+  // forever and the parser bails (same rule as the library drag guard).
+  if (opts.activeFilePath) {
+    const cyclic = data.nodes.find((n) => n.componentFile && wouldCreateComponentCycle(n.componentFile, opts.activeFilePath!));
+    if (cyclic) {
+      trace.action('paste:refused-component-cycle', { componentFile: cyclic.componentFile, activeFilePath: opts.activeFilePath });
+      return { success: false, createdIds: [], userFacing: true, message: cyclic.componentFile === opts.activeFilePath
+        ? 'A component can’t be pasted inside its own master.'
+        : 'That component already contains this one — pasting it here would create a loop.' };
+    }
   }
 
   const ctx: PasteContext = {

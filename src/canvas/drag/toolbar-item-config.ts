@@ -95,7 +95,7 @@ function makeCardPricingChildren(): NewNodeDescriptor[] {
     { tag: 'p', id: generateNodeId('text'), name: 'Text', styles: { fontSize: '32px', fontWeight: '800', color: '#111' }, textContent: '$29' },
     { tag: 'p', id: generateNodeId('text'), name: 'Text', styles: { fontSize: '13px', color: '#888' }, textContent: 'per month' },
     { tag: 'button', id: generateNodeId('button'), name: 'Button', styles: { padding: '10px 20px', borderRadius: '8px', backgroundColor: '#3b82f6', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }, children: [
-      { tag: 'p', id: generateNodeId('text'), name: 'Text', styles: { color: '#ffffff', fontSize: '14px', fontWeight: '600', margin: '0px' }, textContent: 'Get Started' },
+      { tag: 'p', id: generateNodeId('text'), name: 'Text', styles: { color: '#ffffff', fontSize: '14px', fontWeight: '600', margin: '0px', whiteSpace: 'nowrap' }, textContent: 'Get Started' },
     ] },
   ];
 }
@@ -199,7 +199,11 @@ const TOOLBAR_ITEMS: Record<string, ToolbarItem> = {
     // in layers, styleable, and the button itself stays a flex container.
     defaultStyles: { padding: '12px 24px', borderRadius: '8px', backgroundColor: '#3b82f6', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
     children: () => [
-      { tag: 'p', id: generateNodeId('text'), name: 'Text', styles: { color: '#ffffff', fontSize: '15px', fontWeight: '500', margin: '0px' }, textContent: 'Button' },
+      // whiteSpace: nowrap — a button label is one line by definition. Without
+      // it a Fit (min-content) parent measures the label by its LONGEST WORD,
+      // so two buttons in a hugging row overflowed their parent and a
+      // narrowed button stacked "Start / building" (2026-09-08).
+      { tag: 'p', id: generateNodeId('text'), name: 'Text', styles: { color: '#ffffff', fontSize: '15px', fontWeight: '500', margin: '0px', whiteSpace: 'nowrap' }, textContent: 'Button' },
     ],
     ghostSize: { width: 120, height: 44 },
   },

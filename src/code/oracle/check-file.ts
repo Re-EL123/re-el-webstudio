@@ -32,7 +32,7 @@ import { checkPageVariableTypes, checkEventVariables, checkComponentFluidWidth }
 import { checkSlotComponentInlineChildren, checkUnresolvableTernary, checkGridNeedsTemplate, checkGridChildSpan, checkCanvasFillFeedback, checkPaddingNeedsLayout, checkFlexChildOrder, checkOrderIsString, checkFlexChildShrink, checkFlexRowChildFullWidth, checkImageBackgroundFrame, checkNoLayoutParentRelativeChild, checkMediaColumnFlipRebase } from './checks/layout-rules';
 import { checkCanvasConfig } from './checks/canvas-config';
 import { checkOverlayDialect } from './checks/overlay-dialect';
-import { checkSvgShapeDialect } from './checks/svg-shape-dialect';
+import { checkSvgShapeDialect, checkShapeVariantDForm } from './checks/svg-shape-dialect';
 import { checkMotionAppearHidden, checkMotionTransformDrift } from './checks/motion-appear';
 import { checkMotionPropsNeedMotionTag } from './checks/motion-tag';
 import { checkTranslationDialect } from './checks/translation-dialect';
@@ -1268,6 +1268,7 @@ export function checkFile(
   //    RESOLVE (panel shows nothing, gestures mis-route). ────────────────────
   if ((kind === 'page' || kind === 'component') && /<(?:motion\.)?svg[\s/>]/.test(code)) {
     checkSvgShapeDialect(ast, v);
+    checkShapeVariantDForm(code, v);
   }
 
   // ── OVERLAY DIALECT (dropdowns / popovers / modals) — the overlay panel,

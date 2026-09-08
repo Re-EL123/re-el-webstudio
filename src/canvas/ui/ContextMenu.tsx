@@ -208,8 +208,14 @@ export default function ContextMenu() {
   const isNonPrimaryVariantVp = useAtomValue(isComponentVariantViewportAtom);
   const isNonPrimaryArtboard = isReplicaVp || isNonPrimaryVariantVp;
 
-  const handleMakeComponentConfirm = () => {
-    if (!makeCompModal || !makeCompName.trim()) return;
+  // The typed name is passed DIRECTLY (like the Vector Set flow), never read
+  // back from state: the old `setMakeCompName(name); setTimeout(confirm, 0)`
+  // ran a stale closure — the modal's onClose reset the name in the same
+  // batch — so the component was created under the fallback `node.name`
+  // ("Frame") no matter what was typed (2026-09-08).
+  const handleMakeComponentConfirm = (typedName: string) => {
+    const displayName = typedName.trim();
+    if (!makeCompModal || !displayName) return;
     const nodes = getNodesSnapshot();
     const targetNodeId = makeCompModal.nodeId;
 
@@ -327,7 +333,7 @@ export default function ContextMenu() {
     }
 
     const result = makeComponent(
-      activeFilePath, compTargetId, makeCompName.trim(),
+      activeFilePath, compTargetId, displayName,
       !!isDirectViewportChild && vpDims.length > 1,
       vpDims.length > 0 ? vpDims : undefined,
       cmsItemVar,
@@ -414,7 +420,7 @@ export default function ContextMenu() {
     <NameInputModal
       isOpen={!!makeCompModal}
       onClose={handleCloseCompModal}
-      onSubmit={(name) => { setMakeCompName(name); setTimeout(() => handleMakeComponentConfirm(), 0); }}
+      onSubmit={(name) => { setMakeCompName(name); handleMakeComponentConfirm(name); }}
       title="Name Component"
       placeholder="Component name"
       defaultValue={makeCompName || node?.name || ''}

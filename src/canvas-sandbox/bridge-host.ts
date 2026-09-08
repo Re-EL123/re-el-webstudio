@@ -463,6 +463,11 @@ export class PostMessageBridge implements CanvasBridge {
     this.remote?.setCollectionGhostsHidden(containerId, vpPrefix, hidden, nodeId);
   }
 
+  /** Hide / show ONE node transiently (drop re-centre) — see sandbox impl. */
+  setNodeHidden(nodeId: string, vpPrefix: string, hidden: boolean): void {
+    this.remote?.setNodeHidden(nodeId, vpPrefix, hidden);
+  }
+
   /** Swap two children of a parent in DOM order. Either id may be a
    *  regular node `data-id` or a placeholder's `data-placeholder-id`. */
   swapTwoElements(idA: string, idB: string, parentNodeId: string, vpPrefix: string): void {

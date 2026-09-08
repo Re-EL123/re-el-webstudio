@@ -133,6 +133,30 @@ export function setCollectionGhostsHidden(containerId: string, vpPrefix: string,
     trace.action('sandbox:collection-ghosts-hidden', { containerId, vpPrefix, hidden, nodeId: nodeId ?? null });
 }
 
+/** Transient per-node hide for the host's drop pipeline (an auto-sized drop
+ *  is placed on the ghost size, measured, re-centred, THEN shown). Lives in a
+ *  document.head stylesheet — `injectCSS` writes into `[data-canvas-styles]`,
+ *  which the renderer REWRITES on every render, so a rule injected there was
+ *  wiped by the very render that painted the node (2026-09-08: the button
+ *  flashed at the ghost placement, then jumped). Idempotent per node. */
+const hiddenNodeKeys = new Set<string>();
+export function setNodeHidden(nodeId: string, vpPrefix: string, hidden: boolean): void {
+    const STYLE_ID = 'node-transient-hide-style';
+    const key = `${vpPrefix}${nodeId}`;
+    if (hidden) hiddenNodeKeys.add(key); else hiddenNodeKeys.delete(key);
+    let styleEl = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
+    if (!styleEl) {
+      if (!hidden) return;
+      styleEl = document.createElement('style');
+      styleEl.id = STYLE_ID;
+      document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = [...hiddenNodeKeys]
+      .map((k) => `[data-node-id="${k.replace(/"/g, '\\"')}"] { visibility: hidden !important; }`)
+      .join('\n');
+    trace.action('sandbox:node-transient-hide', { nodeId, vpPrefix, hidden, count: hiddenNodeKeys.size });
+}
+
 export function patchStyles(nodeId: string, vpPrefix: string, styles: Record<string, string>, important: boolean): void {
     if (!contentRoot) return;
     // Stale-element guard: during a live re-parent (canvas → frame entry,

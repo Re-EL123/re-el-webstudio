@@ -1566,10 +1566,23 @@ import React from 'react';
 
 export default function Page() {
   return (
-<div data-id="root" data-name="Page" style={{
+<div data-id="root" data-name="Re-EL Landing" style={{
   position: 'relative', width: '100%', height: '900px',
-  backgroundColor: '#ffffff'
+  backgroundColor: '#06124A', display: 'flex', flexDirection: 'column',
+  alignItems: 'center', justifyContent: 'center', fontFamily: 'Inter, sans-serif'
 }}>
+  <h1 data-id="title" data-name="Title" style={{ color: '#FFD700', fontSize: '48px', fontWeight: '800', marginBottom: '16px', textAlign: 'center' }}>
+    Re-EL WebStudio
+  </h1>
+  <p data-id="subtitle" data-name="Subtitle" style={{ color: '#FFFFFF', fontSize: '20px', maxWidth: '600px', textAlign: 'center', lineHeight: '1.5', opacity: 0.9 }}>
+    Design websites with pixel-perfect control. Ship real code you own.
+  </p>
+  <button data-id="cta" data-name="Button" style={{
+    marginTop: '32px', backgroundColor: '#FFD700', color: '#020A2B',
+    padding: '14px 28px', borderRadius: '8px', fontSize: '16px', fontWeight: '700', border: 'none', cursor: 'pointer'
+  }}>
+    Get Started
+  </button>
 </div>
   );
 }

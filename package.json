@@ -1,5 +1,5 @@
 {
-  "name": "revyme",
+  "name": "re-el-webstudio",
   "version": "1.0.0",
   "scripts": {
     "dev": "concurrently \"vite\" \"vite --config vite.sandbox.config.ts\" \"vite --config vite.preview.config.ts\"",
@@ -29,9 +29,9 @@
     "design-tool",
     "code-generation"
   ],
-  "author": "Revyme",
+  "author": "Re-EL WebStudio",
   "license": "AGPL-3.0-only",
-  "description": "Revyme — a visual, code-first website builder. The React code is the document.",
+  "description": "Re-EL WebStudio — a visual, code-first website builder. The React code is the document.",
   "dependencies": {
     "@babel/generator": "^7.29.1",
     "@babel/parser": "^7.29.2",

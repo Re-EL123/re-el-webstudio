@@ -32,37 +32,30 @@ export interface BuilderTheme {
 
 export const BUILDER_THEMES: BuilderTheme[] = [
   {
-    // The stock blue — same hue as the dark-canvas selection stroke, white
-    // label (restored as the shipped default 2026-08-12). Selecting this
-    // REMOVES the overrides rather than re-asserting them, so the
-    // stylesheet's own values (including the tuned `--accent-surface` rgba)
-    // come back exactly as authored.
     id: 'default',
-    label: 'Default',
-    light: { accent: '#b858a3', accentFg: '#ffffff' },
-    dark: { accent: '#b858a3', accentFg: '#ffffff' },
+    label: 'Re-EL Gold & Navy',
+    light: { accent: '#06124A', accentFg: '#ffffff' },
+    dark: { accent: '#FFD700', accentFg: '#020A2B' },
   },
   {
-    // The brass/gold that shipped as the default during the redesign — kept
-    // as a selectable palette. Near-black label: white on gold is 1.9:1.
     id: 'gold',
-    label: 'Gold',
-    light: { accent: '#cec997', accentFg: '#0d1017' },
-    dark: { accent: '#cec997', accentFg: '#0d1017' },
+    label: 'Re-EL Gold',
+    light: { accent: '#FFD700', accentFg: '#020A2B' },
+    dark: { accent: '#D4AF00', accentFg: '#020A2B' },
   },
   {
-    // Maximum contrast against the chrome in both directions: near-black
-    // accent on the light UI, white accent on the dark one.
+    id: 'navy',
+    label: 'Re-EL Navy',
+    light: { accent: '#06124A', accentFg: '#ffffff' },
+    dark: { accent: '#1E3A8A', accentFg: '#ffffff' },
+  },
+  {
     id: 'monochrome',
     label: 'Monochrome',
     light: { accent: '#111111', accentFg: '#ffffff' },
     dark: { accent: '#ffffff', accentFg: '#111111' },
   },
   {
-    // Deep forest green. Every non-Default palette here is tuned so its
-    // WHITE label clears WCAG AA (4.5:1) on the fill — the same bar
-    // globals.css sets for the stock accent. The first-pass hues were all
-    // ~4.0 and had to come down a step.
     id: 'forest',
     label: 'Green Forest',
     light: { accent: '#297f54', accentFg: '#ffffff' },
@@ -81,9 +74,6 @@ export const BUILDER_THEMES: BuilderTheme[] = [
     dark: { accent: '#c04832', accentFg: '#ffffff' },
   },
   {
-    // The pale one: light enough that white labels would wash out, so the
-    // foreground goes near-black instead. This is the case the per-theme
-    // `accentFg` field exists for.
     id: 'amber',
     label: 'Amber',
     light: { accent: '#e0a83c', accentFg: '#1a1206' },

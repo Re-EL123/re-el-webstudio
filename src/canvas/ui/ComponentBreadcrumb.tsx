@@ -3,11 +3,11 @@
 // Shows: [Page button] > [Component1] > [Component2] breadcrumb navigation.
 // Visible whenever activeFile is a component file — not just when entered via double-click.
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { nextFrames } from '@/shared/dom-utils';
 import { createPortal } from 'react-dom';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { activeFilePathAtom, componentBreadcrumbAtom, getFileDisplayName, isMasterFilePath, isComponentLikeFilePath, isTemplateFilePath, getRouteGroup, getHomePageFilePath, getSlugPageParentFile, syncUrlToPage } from '@/code/project/active-file-store';
+import { activeFilePathAtom, componentBreadcrumbAtom, healBreadcrumbTrail, getFileDisplayName, isMasterFilePath, isComponentLikeFilePath, isTemplateFilePath, getRouteGroup, getHomePageFilePath, getSlugPageParentFile, syncUrlToPage } from '@/code/project/active-file-store';
 import { selectedIdsAtom } from '@/code/stores/store';
 import { overlayEditingIdAtom, overlayCallsAtom } from '@/code/stores/overlay-store';
 import { suppressSelectionOverlayAtom } from '@/code/stores/editor-store';
@@ -27,8 +27,15 @@ import VariableModal from '@/editor/ui/VariableModal';
 import { trace } from '@/shared/debug-trace';
 
 export default function ComponentBreadcrumb() {
-  const breadcrumb = useAtomValue(componentBreadcrumbAtom);
+  const rawBreadcrumb = useAtomValue(componentBreadcrumbAtom);
   const [activeFile, setActiveFile] = useAtom(activeFilePathAtom);
+  // Render-time heal (see healBreadcrumbTrail): never show the active file
+  // as its own ancestor, nor a deleted file, nor a duplicated crumb — the
+  // stack can go stale on navigations that bypass the push paths.
+  const breadcrumb = useMemo(
+    () => healBreadcrumbTrail(rawBreadcrumb, activeFile, (p) => projectFS.readFile(p) != null),
+    [rawBreadcrumb, activeFile],
+  );
   const setBreadcrumb = useSetAtom(componentBreadcrumbAtom);
   const setSelectedIds = useSetAtom(selectedIdsAtom);
   const setSuppressSelectionOverlay = useSetAtom(suppressSelectionOverlayAtom);

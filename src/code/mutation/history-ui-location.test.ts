@@ -120,3 +120,52 @@ describe('history restores where the user was', () => {
     expect(projectFS.readFile(FILE)).toBe('v1');
   });
 });
+
+describe('component breadcrumb trail travels with undo/redo', () => {
+  let ui: UiLocation;
+  const wire = () => initHistory(
+    'v1', () => {}, () => FILE, undefined, undefined,
+    { get: () => ({ ...ui, breadcrumb: [...(ui.breadcrumb ?? [])] }), set: (loc) => { ui = { ...loc }; } },
+  );
+  beforeEach(() => {
+    vi.useFakeTimers();
+    ui = { localizationLocale: null, breadcrumb: ['app/page.client.tsx'] };
+    projectFS.loadSnapshot(new Map([[FILE, 'v1'], ['components/Header.tsx', 'h1']]));
+    wire();
+  });
+  afterEach(() => { vi.useRealTimers(); });
+
+  test('nested Make Component: undo restores the pre-op trail, redo the post-op trail', () => {
+    // Inside Header (trail = [page]); the op creates Nested.tsx and the app
+    // navigates into it (trail = [page, Header]) BEFORE the group seals.
+    projectFS.writeFile('components/Nested.tsx', 'n1');
+    projectFS.writeFile('components/Header.tsx', 'h2');
+    pushHistory('');
+    ui = { localizationLocale: null, breadcrumb: ['app/page.client.tsx', 'components/Header.tsx'] };
+    vi.advanceTimersByTime(300);
+
+    undoNow();
+    expect(ui.breadcrumb).toEqual(['app/page.client.tsx']);
+
+    // Simulate the stale hand-pushed stack drifting, then redo must land on
+    // the post-op trail, not the pre-op one and not the drifted one.
+    ui = { localizationLocale: null, breadcrumb: ['app/page.client.tsx', 'components/Header.tsx', 'components/Header.tsx'] };
+    redoNow();
+    expect(ui.breadcrumb).toEqual(['app/page.client.tsx', 'components/Header.tsx']);
+
+    // And a second undo goes back to the pre-op trail again.
+    undoNow();
+    expect(ui.breadcrumb).toEqual(['app/page.client.tsx']);
+  });
+
+  test('immediate push refreshes the post-op trail on the next microtask', async () => {
+    projectFS.writeFile('components/Nested.tsx', 'n1');
+    pushHistoryImmediate('');
+    ui = { localizationLocale: null, breadcrumb: ['app/page.client.tsx', 'components/Header.tsx'] };
+    await Promise.resolve();
+    undoNow();
+    expect(ui.breadcrumb).toEqual(['app/page.client.tsx']);
+    redoNow();
+    expect(ui.breadcrumb).toEqual(['app/page.client.tsx', 'components/Header.tsx']);
+  });
+});

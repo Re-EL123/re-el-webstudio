@@ -1564,6 +1564,17 @@ const KNOWN_GLOBALS = new Set<string>([
   'Image', 'Audio', 'Video', 'Event', 'CustomEvent', 'KeyboardEvent', 'MouseEvent',
   'IntersectionObserver', 'ResizeObserver', 'MutationObserver', 'PerformanceObserver',
   'getComputedStyle', 'matchMedia', 'DOMParser', 'Node', 'Element', 'HTMLElement',
+  // DOM element / drawing classes — referenced at runtime (`instanceof`) and
+  // in TS type positions the scope walk still counts (`useRef<HTMLDivElement>`,
+  // `x as HTMLCanvasElement`); a code component using them was bounced as
+  // WOULD_CRASH (2026-09-09).
+  'HTMLDivElement', 'HTMLSpanElement', 'HTMLCanvasElement', 'HTMLImageElement', 'HTMLVideoElement',
+  'HTMLAudioElement', 'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLButtonElement', 'HTMLAnchorElement',
+  'HTMLParagraphElement', 'HTMLHeadingElement', 'HTMLIFrameElement', 'HTMLSelectElement', 'HTMLFormElement',
+  'HTMLLabelElement', 'HTMLUListElement', 'HTMLLIElement', 'HTMLTableElement', 'HTMLSourceElement',
+  'SVGElement', 'SVGSVGElement', 'SVGPathElement', 'CanvasRenderingContext2D', 'WebGLRenderingContext',
+  'WebGL2RenderingContext', 'ImageData', 'Path2D', 'DOMRect', 'DOMMatrix', 'OffscreenCanvas', 'ImageBitmap',
+  'requestIdleCallback', 'cancelIdleCallback', 'structuredClone', 'queueMicrotask',
   'NodeList', 'Range', 'Selection', 'crypto', 'performance', 'CSS', 'AbortController',
   // more browser APIs
   'alert', 'confirm', 'prompt', 'scrollTo', 'scrollBy', 'getSelection', 'Worker',

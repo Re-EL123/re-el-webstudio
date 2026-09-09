@@ -3,6 +3,7 @@
 // Each command composes low-level operations from node-ops.ts.
 
 import type { CanvasNode } from '@/code/parsing/parser';
+import { unfoldFlowStyles } from './unfold-flow-sizing';
 import { TRANSPARENT_FILL } from '@/shared/css-utils';
 import { getDefaultStore } from 'jotai';
 import { removeNode, updateNodeStyles, isPrimaryViewport, getInteractingViewport, getActiveFilePath, patchNodeStyles, getViewportPrefix, vpIdFromPrefix, parseRectCacheKey, findNodeRect, findNodeComputedStyles } from './node-ops';
@@ -1175,12 +1176,21 @@ export function unfoldChildren(
         flex: '0 0 auto',
       };
     } else if (frameHasLayout && gpHasLayout) {
-      // CASE 3: both layout. Children stay flow; just clear stale absolute
-      // positioning that may have leaked in.
-      styles = {
-        position: 'relative',
-        left: '', top: '',
-      };
+      // CASE 3: both layout. Children stay flow — but their sizing was
+      // written against the FRAME (fill/percent/stretch), and in the
+      // grandparent's layout those declarations resolve differently (a
+      // column-fill child in a row parent: grow now fights for width,
+      // height → auto → 0px, the water-image frame vanished, 2026-09-09).
+      // See unfold-flow-sizing.ts: a single child takes the frame's slot,
+      // several keep the size they painted.
+      const childRect = findNodeRect(childId, vpId);
+      styles = unfoldFlowStyles({
+        frameStyles: node.styles ?? {},
+        childStyles: child.styles ?? {},
+        measured: childRect ? { width: childRect.width / scale, height: childRect.height / scale } : null,
+        siblingCount: node.children.length,
+      });
+      trace.action('commands:unfold-children:flow-sizing', { childId, styles });
     } else {
       // CASE 4: no-layout → no-layout. Add frame offset to child position.
       // Bridge rects are most accurate (handles transforms); inline-style

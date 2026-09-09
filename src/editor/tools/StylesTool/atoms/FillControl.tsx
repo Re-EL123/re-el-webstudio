@@ -31,6 +31,7 @@ import EditAssetPresetPanel from '../../../ui/EditAssetPresetPanel';
 import ColorPresetEditPanel from '../../../ui/ColorPresetEditPanel';
 import { getCanvasBridge } from '@/canvas/canvas-bridge';
 import { isComponentFileAtom, selectedIdsAtom } from '@/code/stores/store';
+import { forSelectionTargets } from '../../../controls/multi-select-targets';
 import { isComponentVariantViewportAtom, activeComponentVariantAtom } from '@/code/stores/viewport-store';
 import { fillClearStyles, isTransparentColor } from './fill-clear';
 import { getContentRoot, updateNodeStyles } from '@/canvas/node-ops';
@@ -341,7 +342,7 @@ function VideoFillTab({ node }: { node: CanvasNode | null }) {
   // Partial-update wrapper — every toggle/select calls this with one field.
   const patchVideo = useCallback((opts: Parameters<typeof queueMutation>[0] extends infer _ ? Record<string, unknown> : never) => {
     if (!nodeId) return;
-    queueMutation({ type: 'setVideoFill', nodeId, opts: opts as any });
+    forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'setVideoFill', nodeId: tid, opts: opts as any }));
     trace.action('fill:video-patched', { nodeId, fields: Object.keys(opts) });
   }, [nodeId]);
 
@@ -349,13 +350,15 @@ function VideoFillTab({ node }: { node: CanvasNode | null }) {
   // clears competing fills that may be set on the host.
   const applyVideoSrc = useCallback((url: string) => {
     if (!nodeId) return;
-    queueMutation({ type: 'setVideoFill', nodeId, opts: { src: url } });
-    queueMutation({ type: 'updateStyles', nodeId, styles: {
-      backgroundColor: '',
-      background: '',
-      backgroundImage: '',
-      backgroundVideo: '',
-    } });
+    forSelectionTargets(nodeId, (tid) => {
+      queueMutation({ type: 'setVideoFill', nodeId: tid, opts: { src: url } });
+      queueMutation({ type: 'updateStyles', nodeId: tid, styles: {
+        backgroundColor: '',
+        background: '',
+        backgroundImage: '',
+        backgroundVideo: '',
+      } });
+    });
     trace.action('fill:video-src-applied', { nodeId, urlLength: url.length });
   }, [nodeId]);
 
@@ -582,7 +585,7 @@ function SingleModeFillContent({ styles, onUpdate, onLivePreview, solidOnly }: {
             // Leaving the Video tab — remove the bg-video child via the
             // dedicated mutation, since it lives on the node, not in styles.
             if (tab === 'video' && nodeId) {
-              queueMutation({ type: 'removeVideoFill', nodeId });
+              forSelectionTargets(nodeId, (tid) => queueMutation({ type: 'removeVideoFill', nodeId: tid }));
             }
           }
           setTab(newTab);
@@ -1498,7 +1501,7 @@ function FillAtom() {
     e.stopPropagation();
     onChangeMultiple(fillClearStyles(onNonDefaultVariant, styles));
     if (node?.id && node.bgVideo) {
-      queueMutation({ type: 'removeVideoFill', nodeId: node.id });
+      forSelectionTargets(node.id, (tid) => queueMutation({ type: 'removeVideoFill', nodeId: tid }));
     }
     trace.action('fill:clear-all', { nodeId: node?.id, onNonDefaultVariant });
   };

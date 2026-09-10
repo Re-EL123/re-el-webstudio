@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useSetAtom } from 'jotai';
-import { appViewAtom, currentUserAtom, setPersistedUser } from '../code/stores/app-view-store';
+import { appViewAtom, currentUserAtom, workspacesAtom, activeWorkspaceAtom, setPersistedUser } from '../code/stores/app-view-store';
+import { loginUser, registerUser, setStudioToken, toUserAccount } from '../backend/studio-api';
 
 export default function AuthScreen() {
   const [tab, setTab] = useState<'login' | 'register'>('login');
@@ -14,6 +15,10 @@ export default function AuthScreen() {
 
   const setAppView = useSetAtom(appViewAtom);
   const setCurrentUser = useSetAtom(currentUserAtom);
+  const setWorkspaces = useSetAtom(workspacesAtom);
+  const setActiveWorkspace = useSetAtom(activeWorkspaceAtom);
+
+  const apiUrl = import.meta.env.VITE_API_URL || '';
 
   const handleGuestAccess = () => {
     const guestUser = {
@@ -27,48 +32,48 @@ export default function AuthScreen() {
     setAppView('dashboard');
   };
 
+  const enterDashboard = (account: Parameters<typeof toUserAccount>[0]) => {
+    const user = toUserAccount(account);
+    setCurrentUser(user);
+    setPersistedUser(user);
+    setAppView('dashboard');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
 
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || '';
       if (apiUrl) {
-        const endpoint = tab === 'login' ? `${apiUrl}/api/auth/login` : `${apiUrl}/api/auth/register`;
-        const payload = tab === 'login' ? { email, password } : { email, password, name };
+        const result =
+          tab === 'login'
+            ? await loginUser(email, password)
+            : await registerUser(name, email, password);
 
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data?.error?.message || 'Authentication failed');
+        setStudioToken(result.token);
+        setWorkspaces(result.workspaces || []);
+        const first = result.workspaces?.[0];
+        if (first) {
+          setActiveWorkspace({
+            id: first.id,
+            name: first.name,
+            owner_id: first.owner_id,
+            plan: first.plan,
+            logo_url: first.logo_url ?? undefined,
+            owner_name: first.owner_name,
+          });
         }
-
-        const userAccount = {
-          id: data.user.id,
-          name: data.user.name,
-          email: data.user.email,
-          token: data.token,
-        };
-
-        setCurrentUser(userAccount);
-        setPersistedUser(userAccount);
-        setAppView('dashboard');
+        enterDashboard(result.user);
       } else {
         // Fallback local auth simulation when backend API URL is not set
         const userAccount = {
           id: 'usr_' + Math.random().toString(36).substring(2, 9),
           name: name || email.split('@')[0] || 'Re-EL User',
           email,
+          role: 'studioUser' as const,
         };
-        setCurrentUser(userAccount);
-        setPersistedUser(userAccount);
-        setAppView('dashboard');
+        enterDashboard(userAccount);
       }
     } catch (err: any) {
       setError(err.message || 'An error occurred during authentication');
@@ -178,6 +183,12 @@ export default function AuthScreen() {
         >
           ⚡ Continue as Guest (Offline Mode)
         </button>
+
+        {!apiUrl && (
+          <p className="text-center text-[10px] text-[#9CA3AF]">
+            Running in offline mode — set VITE_API_URL to connect the studio backend.
+          </p>
+        )}
       </div>
     </div>
   );

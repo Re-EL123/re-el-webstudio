@@ -69,13 +69,15 @@ jobs:
           name: editor-dist
           path: site
       - name: Force-publish to re-el-webstudio#gh-pages
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           cd site
           git init -q -b stale
           git config user.email "pages@re-el-webstudio.bot"
           git config user.name "Re-EL Pages"
           git config http.postBuffer 524288000
-          git remote add origin https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git add -A
           git commit -q -m "deploy: editor @ ${GITHUB_SHA::7}" --allow-empty
           git push -f origin HEAD:gh-pages

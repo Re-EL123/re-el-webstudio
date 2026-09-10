@@ -1,0 +1,105 @@
+name: Deploy GitHub Pages
+
+# Publishes the editor to GitHub Pages on every push to `main`:
+#   editor  → https://webstudio.web-app.rf.gd        (re-el-webstudio, gh-pages)
+#   sandbox → https://sandbox.web-app.rf.gd          (re-el-webstudio-sandbox)
+# The canvas sandbox MUST live on a separate origin than the editor
+# (src/canvas-sandbox/protocol.ts), so it ships as its own Pages site.
+#
+# The sandbox repo is written to with a deploy key held as the
+# SANDBOX_DEPLOY_KEY secret (private half; the public half is registered on
+# the sandbox repo with write access). Deploy happens as a plain branch force-
+# push; both sites use Pages deployment source "Deploy from a branch (gh-pages)".
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Provide build-time env (static multi-origin hosting)
+        run: |
+          cat > .env <<'EOF'
+          VITE_API_URL=https://re-el-webstudio-api.vercel.app
+          VITE_SANDBOX_HOST=https://sandbox.web-app.rf.gd
+          EOF
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm run build:sandbox
+      - name: Write CNAME files
+        run: |
+          echo "webstudio.web-app.rf.gd" > dist/CNAME
+          echo "sandbox.web-app.rf.gd" > dist/sandbox/CNAME
+      - name: Upload editor bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: editor-dist
+          path: dist
+          retention-days: 3
+      - name: Upload sandbox bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: sandbox-dist
+          path: dist/sandbox
+          retention-days: 3
+
+  deploy-editor:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: editor-dist
+          path: site
+      - name: Force-publish to re-el-webstudio#gh-pages
+        run: |
+          cd site
+          git init -q -b stale
+          git config user.email "pages@re-el-webstudio.bot"
+          git config user.name "Re-EL Pages"
+          git config http.postBuffer 524288000
+          git remote add origin https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git
+          git add -A
+          git commit -q -m "deploy: editor @ ${GITHUB_SHA::7}" --allow-empty
+          git push -f origin HEAD:gh-pages
+
+  deploy-sandbox:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sandbox-dist
+          path: site
+      - name: Force-publish to re-el-webstudio-sandbox#gh-pages
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SANDBOX_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          cd site
+          git init -q -b stale
+          git config user.email "pages@re-el-webstudio.bot"
+          git config user.name "Re-EL Pages"
+          git config http.postBuffer 524288000
+          git remote add origin git@github.com:Re-EL123/re-el-webstudio-sandbox.git
+          git add -A
+          git commit -q -m "deploy: sandbox @ ${GITHUB_SHA::7}" --allow-empty
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519" git push -f origin HEAD:gh-pages

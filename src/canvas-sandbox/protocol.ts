@@ -252,10 +252,22 @@ export function isSandboxEvent(data: any): data is SandboxEventMessage {
 // Sandbox is cross-origin (different port = different origin = browser-level
 // process isolation). Comlink works cross-origin via postMessage transport.
 
-/** Sandbox origin (iframe). Different port from parent — same host.
- *  Derived from the editor's own location so it works on localhost, a bare
- *  server IP, or a domain without per-environment config. */
-export const SANDBOX_ORIGIN =
-  typeof window !== 'undefined'
-    ? `${window.location.protocol}//${window.location.hostname}:5174`
-    : 'http://localhost:5174';
+/** Sandbox origin (iframe). Different from parent — cross-origin postMessage
+ *  transport + browser-level isolation. Derived from the editor's own location
+ *  so it works on localhost, a bare server IP, or a domain without
+ *  per-environment config. Overridable for static multi-origin hosting
+ *  (GitHub Pages: editor and sandbox live on different subdomains, so the
+ *  port-derived default is meaningless there). */
+const ENV_SANDBOX_HOST: string | undefined = import.meta.env?.VITE_SANDBOX_HOST as string | undefined;
+export const SANDBOX_ORIGIN = (() => {
+  const raw = ENV_SANDBOX_HOST;
+  if (raw && !/^https?:\/\//i.test(raw)) {
+    return `${window.location.protocol}//${raw}`;
+  }
+  return (
+    raw ??
+    (typeof window !== 'undefined'
+      ? `${window.location.protocol}//${window.location.hostname}:5174`
+      : 'http://localhost:5174')
+  );
+})();

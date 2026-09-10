@@ -128,14 +128,21 @@ describe('createEmptyProject', () => {
       expect(Object.keys(config.positions)).toEqual(['desktop']);
     });
 
-    it('renders a single root <div> with no children', () => {
+    it('renders the Re-EL branded landing hero as the starter content', () => {
       expect(page).toContain('data-id="root"');
+      expect(page).toContain('data-name="Re-EL Landing"');
       expect(page).toContain("height: '900px'");
-      expect(page).toContain("backgroundColor: '#ffffff'");
+      expect(page).toContain("backgroundColor: '#06124A'");
+      // New sites open with a brandable hero (title + subtitle + CTA) so the
+      // canvas is never blank — each piece is a normal, data-id'ed node that
+      // drag/resize/text tools can edit like any other.
+      expect(page).toContain('Re-EL WebStudio');
+      expect(page).toContain('Get Started');
       const rootBodyMatch = page.match(/<div data-id="root"[\s\S]*?>([\s\S]*?)<\/div>/);
       expect(rootBodyMatch).not.toBeNull();
-      // Body is whitespace only — no other JSX tags inside.
-      expect(rootBodyMatch![1].trim()).toBe('');
+      expect(rootBodyMatch![1]).toContain('data-id="title"');
+      expect(rootBodyMatch![1]).toContain('data-id="subtitle"');
+      expect(rootBodyMatch![1]).toContain('data-id="cta"');
     });
   });
 });

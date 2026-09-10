@@ -38,6 +38,7 @@ import { migrateLoadMoreLabelNowrap } from '@/code/generation/cms-pagination-gen
 import { migrateFormSubmitDisplayTransitions } from '@/code/generation/form-submit-gen';
 import { getI18nConfig } from '@/code/project/locale-ops';
 import { openPluginIdAtom } from '@/plugins/registry';
+import { builderProjectPreloadedAtom } from '@/code/stores/app-view-store';
 
 export default function ProjectLoader() {
   const [ready, setReady] = useState(false);
@@ -266,11 +267,14 @@ export default function ProjectLoader() {
       //      a new id not yet on the backend) → seed `createEmptyProject()`
       //      so the user sees a blank single-viewport page instead of
       //      whatever the previous project (now stale) left in projectFS.
-      const fileCount = data?.files ? Object.keys(data.files).length : 0;
+      //    - Preloaded (Dashboard's openInBuilder already hydrated a template
+      //      into ProjectFS) → skip both branches so the snapshot survives.
+      const preloaded = getDefaultStore().get(builderProjectPreloadedAtom);
+      const fileCount = preloaded ? -1 : (data?.files ? Object.keys(data.files).length : 0);
       if (fileCount > 0) {
         projectFS.loadSnapshot(new Map(Object.entries(data!.files)));
         trace.action('project-loader:snapshot-loaded', { fileCount });
-      } else {
+      } else if (!preloaded) {
         projectFS.loadSnapshot(createEmptyProject());
         trace.action('project-loader:seeded-empty', { fileCount: projectFS.listFiles().length });
         // Brand-new cloud website (dashboard creates rows with zero files):

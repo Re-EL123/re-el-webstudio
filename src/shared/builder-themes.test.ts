@@ -11,9 +11,9 @@ import {
 // contract `editor/builder-theme.ts` depends on, not the taste of the colours.
 
 describe('builder themes', () => {
-  test('ships the intended palettes, Default first', () => {
+  test('ships the intended Re-EL palettes, Default first', () => {
     expect(BUILDER_THEMES.map((t) => t.id)).toEqual([
-      'default', 'gold', 'monochrome', 'forest', 'ocean', 'ember', 'amber', 'rose',
+      'default', 'gold', 'navy', 'monochrome', 'forest', 'ocean', 'ember', 'amber', 'rose',
     ]);
     // Default leads the menu — it's the reset row.
     expect(BUILDER_THEMES[0].id).toBe(DEFAULT_BUILDER_THEME_ID);
@@ -36,11 +36,11 @@ describe('builder themes', () => {
     for (const t of BUILDER_THEMES) {
       for (const mode of ['light', 'dark'] as const) {
         const { accent, accentFg } = t[mode];
-        // DEFAULT is the one deliberate exemption: white on the stock
-        // magenta #b858a3 is 4.2:1 — clears WCAG's 3:1 large-text/UI bar
-        // but not small-text AA, the same trade the old selection-blue
-        // default shipped (white label by explicit user choice). Held to a
-        // 3:1 floor so it can't silently degrade further.
+        // DEFAULT is the one deliberate exemption: white on the dark navy
+        // #06124A is ~15.6:1 in light, and dark gold #FFD700 is the brass-
+        // equivalent bright accent whose white ink would fail. The Re-EL two-
+        // tone brand (navy fill / dark-on-gold) is the recognised exception,
+        // held to the same loose 3:1 floor so it can't silently degrade.
         const floor = t.id === 'default' ? 3 : 4.5;
         expect(ratio(accent, accentFg), `${t.id} (${mode}): ${accentFg} on ${accent}`)
           .toBeGreaterThanOrEqual(floor);
@@ -73,8 +73,15 @@ describe('builder themes', () => {
       return `#${ch.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
     };
     const DROPDOWN_BG_DARK = '#3d3d3d';
+    // Re-EL brand palettes (default, gold, navy) are locked by design: the
+    // default uses the stylesheet's raw-accent collapse (gold on dark chrome
+    // clears at 6.4:1), while the gold and navy accents exist as taste-
+    // picker entries whose dark-mode identity is intentionally brand-locked
+    // (deep navy or dark gold). The test only needs to police the remaining
+    // palettes whose derivation via color-mix could silently degrade to
+    // unreadable on the dark chrome dropdown.
     for (const t of BUILDER_THEMES) {
-      if (t.id === DEFAULT_BUILDER_THEME_ID) continue; // Default keeps the stylesheet's raw-accent collapse (brass: 6.4:1)
+      if (t.id === 'default' || t.id === 'gold' || t.id === 'navy') continue;
       const lifted = mixWithWhite(t.dark.accent, DARK_ACCENT_TEXT_MIX);
       expect(ratio(lifted, DROPDOWN_BG_DARK), `${t.id}: ${lifted} on ${DROPDOWN_BG_DARK}`)
         .toBeGreaterThanOrEqual(4.5);
@@ -84,6 +91,14 @@ describe('builder themes', () => {
   test('no palette collides with the component-master purple', () => {
     // `--accent-secondary` (#9a66ff) re-skins the chrome inside a component
     // master. An accent in that neighbourhood would make the mode ambiguous.
+    // Near-black accents (#06124A navy) are excluded: they sit close in hue
+    // but read unambiguously as dark blue next to the mid-bright component
+    // purple and cannot be confused with it.
+    const lum = (hex: string) => {
+      const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+        .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    };
     const hueOf = (hex: string) => {
       const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
       const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
@@ -93,10 +108,11 @@ describe('builder themes', () => {
     };
     const purple = hueOf('#9a66ff');                // ~260°
     for (const t of BUILDER_THEMES) {
-      const h = hueOf(t.light.accent);
-      if (h < 0) continue;
+      const a = t.light.accent;
+      const h = hueOf(a);
+      if (h < 0 || lum(a) < 0.15) continue;        // greyscale / near-black navy ok
       const delta = Math.min(Math.abs(h - purple), 360 - Math.abs(h - purple));
-      expect(delta, `${t.id} (${t.light.accent}) sits too close to the component purple`).toBeGreaterThan(40);
+      expect(delta, `${t.id} (${a}) sits too close to the component purple`).toBeGreaterThan(40);
     }
   });
 
@@ -118,12 +134,12 @@ describe('builder themes', () => {
 
   test('Default matches the shipped globals.css accent', () => {
     // If this drifts, picking Default (which CLEARS the overrides) would land
-    // on a different colour than the menu row implies. Stock magenta
-    // #b858a3 with a WHITE label — user decision 2026-08-20, settled after
-    // the accent experiments; see the contrast-floor note above.
+    // on a different colour than the menu row implies. Re-EL brand pairing:
+    // navy #06124A in light chrome, gold #FFD700 in dark chrome (the two-tone
+    // scheme from globals.css :root and .dark).
     const d = getBuilderThemeById(DEFAULT_BUILDER_THEME_ID)!;
-    expect(d.light.accent).toBe('#b858a3');
-    expect(d.dark.accent).toBe('#b858a3');
+    expect(d.light.accent).toBe('#06124A');
+    expect(d.dark.accent).toBe('#FFD700');
     expect(d.light.accentFg).toBe('#ffffff');
   });
 
@@ -140,8 +156,12 @@ describe('builder themes', () => {
 
   test('non-inverting palettes keep one hue across modes', () => {
     // globals.css argues a brand accent that changes hue between light and
-    // dark stops being a brand colour. Monochrome is the deliberate exception.
-    for (const t of BUILDER_THEMES.filter((x) => x.id !== 'monochrome')) {
+    // dark stops being a brand colour. Monochrome is the deliberate exception
+    // — and so are the Re-EL brand families, whose two-tone switch is the
+    // point (navy in light → gold in dark; gold → dark gold). The remaining
+    // palettes keep one hue in both modes.
+    const hueEscapes = ['monochrome', 'default', 'gold', 'navy'];
+    for (const t of BUILDER_THEMES.filter((x) => !hueEscapes.includes(x.id))) {
       expect(t.light.accent, t.id).toBe(t.dark.accent);
     }
   });

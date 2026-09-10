@@ -34,6 +34,7 @@ import Button from '@/design-system/Button';
 import { useIsViewer } from '@/code/stores/viewer-mode-store';
 import { settingsOverlayOpenAtom, settingsSectionAtom, hasActiveSubscriptionAtom } from '@/code/stores/website-settings-store';
 import { CLOUD_ENABLED } from '@/shared/cloud-flag';
+import { appViewAtom } from '@/code/stores/app-view-store';
 import { leaveBuilderTo } from '@/backend/leave-builder';
 
 // ─── Back chevron — same glyph the settings overlay uses for its
@@ -80,6 +81,7 @@ export function LogoButton() {
   const hasActiveSubscription = useAtomValue(hasActiveSubscriptionAtom);
   const setSettingsOpen = useSetAtom(settingsOverlayOpenAtom);
   const setSettingsSection = useSetAtom(settingsSectionAtom);
+  const setAppView = useSetAtom(appViewAtom);
 
   // Preference atoms — `buildPreferencesSubmenu` needs them so the toggle
   // rows can render their current state + flip atoms on click. Subscribing
@@ -114,15 +116,7 @@ export function LogoButton() {
         label: 'Go to Dashboard',
         onClick: () => {
           trace.action('left-header:logo-dashboard');
-          // Hard nav: `/dashboard` is owned by revyme-cloud (different
-          // app), reached via the dispatcher. React Router with
-          // basename="/builder" can't route there.
-          //
-          // leaveBuilderTo, not a bare assignment: it flushes the mutation
-          // queue AND awaits the backend save. Doing only the first left the
-          // project dirty at unload, which is exactly when the browser's
-          // "Leave site?" guard fires.
-          void leaveBuilderTo('/dashboard', 'logo-dashboard');
+          setAppView('dashboard');
         },
       },
       {
